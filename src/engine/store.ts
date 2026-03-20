@@ -11,6 +11,7 @@ import type {
   MilkStats,
   RelationshipTier,
   CowCondition,
+  CameraMode,
 } from './types'
 import {
   EXCLUSION_ZONES,
@@ -186,7 +187,7 @@ export const gameStore = createStore<GameStore>()((set, get) => {
     world: initial.world,
     events: [] as EngineEvent[],
     cameraMode: 'cinematic' as const,
-    cinematicView: false,
+    cinematicView: typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('cinema') === 'true',
     _prevCameraMode: 'cinematic' as CameraMode,
     rain: initial.rain,
     rainIntensity: initial.rainIntensity,
