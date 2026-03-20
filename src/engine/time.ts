@@ -146,11 +146,11 @@ export function getAmbientIntensity(timeOfDay: number): number {
  * Map continuous hour to a discrete TimeOfDay label.
  */
 export function getTimeLabel(timeOfDay: number): TimeOfDay {
-  if (timeOfDay >= 5 && timeOfDay < 7) return 'dawn'
-  if (timeOfDay >= 7 && timeOfDay < 11) return 'morning'
+  if (timeOfDay >= SUNRISE_HOUR - 1 && timeOfDay < SUNRISE_HOUR + 1) return 'dawn'
+  if (timeOfDay >= SUNRISE_HOUR + 1 && timeOfDay < 11) return 'morning'
   if (timeOfDay >= 11 && timeOfDay < 14) return 'noon'
-  if (timeOfDay >= 14 && timeOfDay < 17) return 'afternoon'
-  if (timeOfDay >= 17 && timeOfDay < 21) return 'evening'
+  if (timeOfDay >= 14 && timeOfDay < SUNSET_HOUR - 2) return 'afternoon'
+  if (timeOfDay >= SUNSET_HOUR - 2 && timeOfDay < SUNSET_HOUR + 2) return 'evening'
   return 'night'
 }
 

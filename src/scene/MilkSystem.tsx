@@ -12,6 +12,7 @@ const VAN_SPEED = 3
 const LOAD_WAIT = 6 // seconds for person to collect milk
 const MILK_DURATION = 10 // must match milking activity duration in store.ts
 const FILL_RATE = 100 / MILK_DURATION // fills bucket in one milking session
+const GATE_X = 14 // gate position — van must pass through here
 
 // ── Van state machine ────────────────────────────────────
 
@@ -267,6 +268,7 @@ export default function MilkSystem() {
   const vanX = useRef(VAN_OFFSCREEN_X)
   const showCollector = useRef(false)
   const wasMilking = useRef(false)
+  const vanOpenedGate = useRef(false) // tracks whether the van auto-opened the gate
 
   useFrame((_state, delta) => {
     const dt = Math.min(delta, 0.05)
@@ -295,6 +297,13 @@ export default function MilkSystem() {
         break
 
       case 'arriving': {
+        // Auto-open gate when van reaches it
+        const gates = gameStore.getState().world.gates
+        const gate = gates.find((g) => g.id === 'gate_right')
+        if (gate && !gate.isOpen && vanX.current <= GATE_X + 3) {
+          gameStore.getState().playerAction({ type: 'toggle_gate', gateId: 'gate_right' })
+          vanOpenedGate.current = true
+        }
         vanX.current -= VAN_SPEED * dt
         if (vanX.current <= VAN_PARK_POS[0]) {
           vanX.current = VAN_PARK_POS[0]
@@ -318,6 +327,14 @@ export default function MilkSystem() {
 
       case 'departing': {
         vanX.current += VAN_SPEED * dt
+        // Auto-close gate after van clears it
+        if (vanOpenedGate.current && vanX.current >= GATE_X + 3) {
+          const g = gameStore.getState().world.gates.find((g) => g.id === 'gate_right')
+          if (g && g.isOpen) {
+            gameStore.getState().playerAction({ type: 'toggle_gate', gateId: 'gate_right' })
+          }
+          vanOpenedGate.current = false
+        }
         if (vanX.current >= VAN_OFFSCREEN_X) {
           vanX.current = VAN_OFFSCREEN_X
           vanPhase.current = 'hidden'

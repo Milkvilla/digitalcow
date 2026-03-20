@@ -3,7 +3,8 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Stats } from '@react-three/drei'
 import { useStore } from 'zustand'
 import * as THREE from 'three'
-import { EffectComposer, Bloom, Vignette, BrightnessContrast, HueSaturation, N8AO } from '@react-three/postprocessing'
+import { EffectComposer, Bloom, Vignette, BrightnessContrast, HueSaturation, N8AO, ToneMapping, SMAA } from '@react-three/postprocessing'
+import { ToneMappingMode } from 'postprocessing'
 import type { EngineEvent } from '../engine/types.ts'
 import {
   CAMERA_POSITION,
@@ -12,6 +13,8 @@ import {
   SIM_TICK,
   MAX_SUBSTEPS_PER_FRAME,
   SCENE_LAYOUT,
+  SUNSET_HOUR,
+  outdoorLightFactor,
 } from '../engine/constants.ts'
 import { getSunPosition } from '../engine/time.ts'
 import { getTimePalette } from '../engine/palette.ts'
@@ -69,59 +72,385 @@ function DynamicFog({ timeOfDay }: { timeOfDay: number }) {
   return null
 }
 
-// ── Cinematic camera (slow orbit around cow) ─────────────
-// Reads cow position directly from store each frame (no React re-render dependency)
+// ── Cinematic camera — film-quality director system ────────────
+//
+// Design principles:
+//   1. Camera ALWAYS keeps the cow visible — no shots behind structures
+//   2. Positions are clamped inside the farm perimeter (no fog)
+//   3. Every shot blends via dual smoothing (position + target) for buttery transitions
+//   4. Shot variety: intimate portraits, sweeping vistas, dynamic tracking, and moody angles
+//   5. Each shot picks a safe angle that avoids occlusion zones BEFORE computing position
+
+// Farm bounds (inside fence perimeter with margin)
+const FARM_MIN_X = -13, FARM_MAX_X = 13
+const FARM_MIN_Z = -11, FARM_MAX_Z = 13
+
+// Structures the camera must avoid
+const OCCLUSION_ZONES = [
+  { x: -10, z: 8, r: 7.5 },   // barn
+  { x: 10,  z: 10, r: 3.5 },  // windmill
+]
+
+// Points of interest for scenic shots
+const POI: [number, number, number][] = [
+  [-10, 2.5, 8],   // barn
+  [-8, 0.5, -5],   // pond
+  [10, 3, 10],     // windmill
+  [3, 0.5, 7],     // water well
+  [0, 0.5, 0],     // farm center
+  [4, 0.5, 3],     // scarecrow area
+  [-12, 0.5, 6],   // hay bales
+]
+
+function clampToFarm(pos: THREE.Vector3): void {
+  pos.x = Math.max(FARM_MIN_X, Math.min(FARM_MAX_X, pos.x))
+  pos.z = Math.max(FARM_MIN_Z, Math.min(FARM_MAX_Z, pos.z))
+  pos.y = Math.max(0.3, pos.y) // never below ground
+}
+
+// Check if a position is inside any occlusion zone
+function isOccluded(x: number, z: number): boolean {
+  for (const zone of OCCLUSION_ZONES) {
+    const dx = x - zone.x, dz = z - zone.z
+    if (dx * dx + dz * dz < zone.r * zone.r) return true
+  }
+  return false
+}
+
+// Check if line-of-sight from camera to target is blocked by an occlusion zone
+function isLineOfSightBlocked(cx: number, cz: number, tx: number, tz: number): boolean {
+  const lx = tx - cx, lz = tz - cz
+  const len2 = lx * lx + lz * lz
+  if (len2 < 0.01) return false
+  for (const zone of OCCLUSION_ZONES) {
+    const t = Math.max(0, Math.min(1, ((zone.x - cx) * lx + (zone.z - cz) * lz) / len2))
+    if (t < 0.05 || t > 0.95) continue
+    const px = cx + lx * t - zone.x
+    const pz = cz + lz * t - zone.z
+    if (px * px + pz * pz < zone.r * zone.r * 0.7) return true
+  }
+  return false
+}
+
+// Find a safe angle around the cow that avoids occlusion and line-of-sight blockage
+function findSafeAngle(cowX: number, cowZ: number, preferredAngle: number, radius: number): number {
+  // Try preferred angle first
+  const testX = cowX + Math.cos(preferredAngle) * radius
+  const testZ = cowZ + Math.sin(preferredAngle) * radius
+  if (!isOccluded(testX, testZ) && !isLineOfSightBlocked(testX, testZ, cowX, cowZ)) {
+    return preferredAngle
+  }
+  // Search in 30° increments, alternating left/right from preferred
+  for (let i = 1; i <= 6; i++) {
+    for (const sign of [1, -1]) {
+      const angle = preferredAngle + sign * i * (Math.PI / 6)
+      const ax = cowX + Math.cos(angle) * radius
+      const az = cowZ + Math.sin(angle) * radius
+      if (!isOccluded(ax, az) && !isLineOfSightBlocked(ax, az, cowX, cowZ)) {
+        return angle
+      }
+    }
+  }
+  return preferredAngle + Math.PI // flip 180° as last resort
+}
+
+type ShotType = 'orbit' | 'tracking' | 'closeup' | 'crane' | 'lowAngle' | 'establishing' | 'dolly' | 'overShoulder' | 'scenic' | 'flyby'
+
+interface ShotDef {
+  type: ShotType
+  duration: number
+  fov: number
+}
+
+const SHOT_SEQUENCE: ShotDef[] = [
+  { type: 'establishing', duration: 12,  fov: 48 },   // high wide establishing
+  { type: 'orbit',        duration: 16,  fov: 38 },   // smooth orbit
+  { type: 'closeup',      duration: 9,   fov: 26 },   // tight portrait
+  { type: 'scenic',       duration: 14,  fov: 44 },   // POI showcase → cow
+  { type: 'tracking',     duration: 13,  fov: 34 },   // side dolly track
+  { type: 'crane',        duration: 15,  fov: 42 },   // crane down
+  { type: 'overShoulder', duration: 10,  fov: 30 },   // behind cow looking out
+  { type: 'flyby',        duration: 11,  fov: 36 },   // fast low sweep past cow
+  { type: 'lowAngle',     duration: 11,  fov: 30 },   // dramatic hero shot
+  { type: 'dolly',        duration: 13,  fov: 36 },   // dolly in
+  { type: 'orbit',        duration: 18,  fov: 40 },   // wide slow orbit
+  { type: 'closeup',      duration: 7,   fov: 24 },   // quick tight
+  { type: 'establishing', duration: 14,  fov: 50 },   // golden hour wide
+  { type: 'tracking',     duration: 11,  fov: 32 },   // close tracking
+  { type: 'scenic',       duration: 12,  fov: 42 },   // scenic sweep
+  { type: 'crane',        duration: 14,  fov: 40 },   // crane up (reverse)
+]
 
 function CinematicCamera() {
   const { camera } = useThree()
-  const angleRef = useRef(0)
   const timeRef = useRef(0)
+  const shotTimeRef = useRef(0)
+  const shotIndexRef = useRef(0)
   const initialized = useRef(false)
-  // Persistent vectors — no allocations per frame
+  const prevCowDir = useRef(new THREE.Vector3(0, 0, 1))
+
+  // Smooth interpolation state
+  const smoothPos = useRef(new THREE.Vector3())
   const smoothTarget = useRef(new THREE.Vector3())
-  const smoothCamPos = useRef(new THREE.Vector3())
-  const _desiredTarget = useRef(new THREE.Vector3())
-  const _desiredCamPos = useRef(new THREE.Vector3())
+  const smoothFov = useRef(CAMERA_FOV)
+
+  // Per-shot seeds
+  const seed = useRef({
+    angle: Math.random() * Math.PI * 2,
+    safeAngle: 0,
+    poiIdx: 0,
+    side: 1,
+    startRadius: 12,
+    heightBias: 0,
+  })
+
+  const _pos = useRef(new THREE.Vector3())
+  const _target = useRef(new THREE.Vector3())
 
   useFrame((_state, delta) => {
-    // Read cow position directly from store — avoids stale closure from React renders
-    const cowPos = gameStore.getState().cow.position
+    const state = gameStore.getState()
+    const cowPos = state.cow.position
+    const cowFacing = state.cow.facingAngle
+    const dt = Math.min(delta, 0.05)
+
+    const cowWorld = new THREE.Vector3(cowPos[0], 0.6, cowPos[2])
+    const cowDir = new THREE.Vector3(Math.sin(cowFacing), 0, Math.cos(cowFacing))
+    prevCowDir.current.lerp(cowDir, 1 - Math.exp(-2.0 * dt))
 
     if (!initialized.current) {
-      smoothTarget.current.set(cowPos[0], 0.6, cowPos[2])
-      smoothCamPos.current.set(
-        cowPos[0] + Math.cos(0) * 21,
-        0.6 + 5.5,
-        cowPos[2] + Math.sin(0) * 21,
+      const initAngle = findSafeAngle(cowPos[0], cowPos[2], Math.PI * 0.25, 12)
+      smoothPos.current.set(
+        cowPos[0] + Math.cos(initAngle) * 12,
+        8,
+        cowPos[2] + Math.sin(initAngle) * 12,
       )
+      smoothTarget.current.copy(cowWorld)
       initialized.current = true
     }
 
-    timeRef.current += delta
+    timeRef.current += dt
+    shotTimeRef.current += dt
     const t = timeRef.current
 
-    // ── Desired look-at target (cow position, smoothed) ──
-    _desiredTarget.current.set(cowPos[0], 0.6, cowPos[2])
-    smoothTarget.current.lerp(_desiredTarget.current, 1 - Math.exp(-0.6 * delta))
+    // ── Shot transitions ──
+    const currentShot = SHOT_SEQUENCE[shotIndexRef.current % SHOT_SEQUENCE.length]
+    if (shotTimeRef.current >= currentShot.duration) {
+      shotTimeRef.current = 0
+      shotIndexRef.current++
+      const baseAngle = seed.current.angle + (Math.random() - 0.5) * 2.0
+      const nextShot = SHOT_SEQUENCE[shotIndexRef.current % SHOT_SEQUENCE.length]
+      const testR = nextShot.type === 'closeup' || nextShot.type === 'overShoulder' ? 4 : 10
+      seed.current = {
+        angle: baseAngle,
+        safeAngle: findSafeAngle(cowPos[0], cowPos[2], baseAngle, testR),
+        poiIdx: Math.floor(Math.random() * POI.length),
+        side: Math.random() > 0.5 ? 1 : -1,
+        startRadius: 8 + Math.random() * 6,
+        heightBias: Math.random() * 2,
+      }
+    }
 
-    // ── Orbit parameters — all change very slowly ──
-    angleRef.current += delta * 0.04            // ~157s full orbit
-    const radius = 21 + Math.sin(t * 0.025) * 9   // 12–30, ~251s cycle
-    const height = 9 + Math.sin(t * 0.035 + 1.2) * 6  // 3–15, ~180s cycle
+    const shot = SHOT_SEQUENCE[shotIndexRef.current % SHOT_SEQUENCE.length]
+    const progress = shotTimeRef.current / shot.duration
+    const ease = progress * progress * (3 - 2 * progress) // smoothstep 0→1
+    const s = seed.current
 
-    // ── Desired camera position ──
-    _desiredCamPos.current.set(
-      smoothTarget.current.x + Math.cos(angleRef.current) * radius,
-      smoothTarget.current.y + height,
-      smoothTarget.current.z + Math.sin(angleRef.current) * radius,
-    )
+    // Slowly evolve the safe angle during the shot to keep it valid as cow moves
+    s.safeAngle = findSafeAngle(cowWorld.x, cowWorld.z, s.safeAngle, 10)
 
-    // ── Heavy exponential smoothing on camera position ──
-    // 0.3 → ~3.3s to reach 63% of target — very buttery
-    smoothCamPos.current.lerp(_desiredCamPos.current, 1 - Math.exp(-0.3 * delta))
+    switch (shot.type) {
+      case 'orbit': {
+        // Smooth orbit around cow at medium distance
+        s.angle += dt * 0.055
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.angle, s.startRadius)
+        const r = s.startRadius + Math.sin(t * 0.03) * 1.5
+        const h = 4 + s.heightBias + Math.sin(t * 0.025 + 1.2) * 2
+        _pos.current.set(
+          cowWorld.x + Math.cos(safeA) * r,
+          h,
+          cowWorld.z + Math.sin(safeA) * r,
+        )
+        _target.current.set(cowWorld.x, cowWorld.y + 0.1, cowWorld.z)
+        break
+      }
 
-    camera.position.copy(smoothCamPos.current)
+      case 'tracking': {
+        // Side tracking shot — moves parallel to cow direction
+        const perpX = prevCowDir.current.z * s.side
+        const perpZ = -prevCowDir.current.x * s.side
+        const trackDist = 4.5 + Math.sin(t * 0.04) * 1
+        let px = cowWorld.x + perpX * trackDist
+        let pz = cowWorld.z + perpZ * trackDist
+        // If that position is occluded, flip to other side
+        if (isOccluded(px, pz) || isLineOfSightBlocked(px, pz, cowWorld.x, cowWorld.z)) {
+          px = cowWorld.x - perpX * trackDist
+          pz = cowWorld.z - perpZ * trackDist
+        }
+        _pos.current.set(px, cowWorld.y + 1.5 + Math.sin(t * 0.05) * 0.3, pz)
+        _target.current.set(
+          cowWorld.x + prevCowDir.current.x * 2,
+          cowWorld.y + 0.3,
+          cowWorld.z + prevCowDir.current.z * 2,
+        )
+        break
+      }
+
+      case 'closeup': {
+        // Intimate close-up, gentle slow arc
+        s.angle += dt * 0.06
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.angle, 3)
+        const cr = 2.8 + Math.sin(t * 0.07) * 0.4
+        _pos.current.set(
+          cowWorld.x + Math.cos(safeA) * cr,
+          cowWorld.y + 0.6 + Math.sin(t * 0.06) * 0.15,
+          cowWorld.z + Math.sin(safeA) * cr,
+        )
+        _target.current.set(cowWorld.x, cowWorld.y + 0.25, cowWorld.z)
+        break
+      }
+
+      case 'crane': {
+        // Crane: swoops from high/wide down to medium height
+        const craneH = 16 * (1 - ease) + 5 * ease
+        const craneR = 16 * (1 - ease) + 8 * ease
+        s.angle += dt * 0.04
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.angle, craneR)
+        _pos.current.set(
+          cowWorld.x + Math.cos(safeA) * craneR,
+          craneH,
+          cowWorld.z + Math.sin(safeA) * craneR,
+        )
+        _target.current.set(cowWorld.x, cowWorld.y, cowWorld.z)
+        break
+      }
+
+      case 'lowAngle': {
+        // Dramatic low angle — near ground, looking up at cow like a hero shot
+        s.angle += dt * 0.035
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.angle, 5)
+        const laR = 4.5 + Math.sin(t * 0.04) * 1
+        _pos.current.set(
+          cowWorld.x + Math.cos(safeA) * laR,
+          0.35 + Math.sin(t * 0.06) * 0.1,
+          cowWorld.z + Math.sin(safeA) * laR,
+        )
+        _target.current.set(cowWorld.x, cowWorld.y + 0.6, cowWorld.z)
+        break
+      }
+
+      case 'establishing': {
+        // High wide shot — shows the whole farm, gently panning
+        s.angle += dt * 0.012
+        const estR = 18 + Math.sin(t * 0.01) * 2
+        _pos.current.set(
+          Math.cos(s.angle) * estR,
+          16 + Math.sin(t * 0.015 + 2) * 2,
+          Math.sin(s.angle) * estR,
+        )
+        // Target blends from farm center to cow over the shot
+        _target.current.set(
+          cowWorld.x * ease,
+          1 + cowWorld.y * ease,
+          cowWorld.z * ease,
+        )
+        break
+      }
+
+      case 'dolly': {
+        // Dolly in: starts wide, pushes in toward cow
+        const dollyStart = s.startRadius + 6
+        const dollyEnd = 4
+        const dollyR = dollyStart * (1 - ease) + dollyEnd * ease
+        const dollyH = 7 * (1 - ease) + 2.5 * ease
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.safeAngle, dollyR)
+        _pos.current.set(
+          cowWorld.x + Math.cos(safeA) * dollyR,
+          dollyH,
+          cowWorld.z + Math.sin(safeA) * dollyR,
+        )
+        _target.current.set(cowWorld.x, cowWorld.y + 0.15, cowWorld.z)
+        break
+      }
+
+      case 'overShoulder': {
+        // Behind and slightly above the cow, looking in the direction she faces
+        const behindX = -prevCowDir.current.x
+        const behindZ = -prevCowDir.current.z
+        let px = cowWorld.x + behindX * 3 + prevCowDir.current.z * s.side * 1.2
+        let pz = cowWorld.z + behindZ * 3 - prevCowDir.current.x * s.side * 1.2
+        if (isOccluded(px, pz)) {
+          px = cowWorld.x + behindX * 3 - prevCowDir.current.z * s.side * 1.2
+          pz = cowWorld.z + behindZ * 3 + prevCowDir.current.x * s.side * 1.2
+        }
+        _pos.current.set(px, cowWorld.y + 1.6, pz)
+        // Look ahead of cow — what she's looking at
+        _target.current.set(
+          cowWorld.x + prevCowDir.current.x * 8,
+          cowWorld.y + 0.2,
+          cowWorld.z + prevCowDir.current.z * 8,
+        )
+        break
+      }
+
+      case 'scenic': {
+        // Start framed on a POI, sweep to reveal the cow
+        const poi = POI[s.poiIdx]
+        const fromX = poi[0] + Math.cos(s.safeAngle) * 5
+        const fromZ = poi[2] + Math.sin(s.safeAngle) * 5
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.safeAngle, 8)
+        const toX = cowWorld.x + Math.cos(safeA) * 8
+        const toZ = cowWorld.z + Math.sin(safeA) * 8
+        _pos.current.set(
+          fromX * (1 - ease) + toX * ease,
+          poi[1] + 5 * (1 - ease) + 4 * ease,
+          fromZ * (1 - ease) + toZ * ease,
+        )
+        _target.current.set(
+          poi[0] * (1 - ease) + cowWorld.x * ease,
+          poi[1] * (1 - ease) + cowWorld.y * ease,
+          poi[2] * (1 - ease) + cowWorld.z * ease,
+        )
+        break
+      }
+
+      case 'flyby': {
+        // Fast low sweep past the cow — dynamic energy
+        const flyAngle = s.safeAngle + ease * Math.PI * 0.8
+        const flyR = 6 + (1 - Math.abs(ease - 0.5) * 2) * 3 // closest at midpoint
+        _pos.current.set(
+          cowWorld.x + Math.cos(flyAngle) * flyR,
+          1.2 + Math.sin(ease * Math.PI) * 1.5, // arc up in the middle
+          cowWorld.z + Math.sin(flyAngle) * flyR,
+        )
+        _target.current.set(cowWorld.x, cowWorld.y + 0.3, cowWorld.z)
+        break
+      }
+    }
+
+    // Clamp to farm bounds
+    clampToFarm(_pos.current)
+
+    // ── Dual-rate smoothing ──
+    // Shots that move fast get tighter tracking; slow shots get dreamier smoothing
+    const isQuickShot = shot.type === 'flyby' || shot.type === 'tracking'
+    const posRate = isQuickShot ? 1.8 : 1.0
+    const targetRate = isQuickShot ? 3.0 : 2.0
+
+    const posLerp = 1 - Math.exp(-posRate * dt)
+    const targetLerp = 1 - Math.exp(-targetRate * dt)
+    const fovLerp = 1 - Math.exp(-1.0 * dt)
+
+    smoothPos.current.lerp(_pos.current, posLerp)
+    smoothTarget.current.lerp(_target.current, targetLerp)
+    smoothFov.current += (shot.fov - smoothFov.current) * fovLerp
+
+    camera.position.copy(smoothPos.current)
     camera.lookAt(smoothTarget.current)
+
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.fov = smoothFov.current
+      camera.updateProjectionMatrix()
+    }
   })
 
   return null
@@ -440,6 +769,51 @@ function RendererStats() {
   return null
 }
 
+// ── Farm gate lights ────────────────────────────────────
+
+function GateLightPost({ position }: { position: [number, number, number]; }) {
+  return (
+    <group position={position}>
+      {/* Post-top cap */}
+      <mesh position={[0, 1.05, 0]}>
+        <boxGeometry args={[0.18, 0.04, 0.18]} />
+        <meshStandardMaterial color="#3a3a3a" metalness={0.6} roughness={0.35} />
+      </mesh>
+      {/* Lamp housing */}
+      <group position={[0, 1.15, 0]}>
+        <mesh>
+          <boxGeometry args={[0.20, 0.08, 0.16]} />
+          <meshStandardMaterial color="#2a2a2a" metalness={0.6} roughness={0.35} />
+        </mesh>
+        {/* Glass lens */}
+        <mesh position={[0, -0.05, 0]}>
+          <boxGeometry args={[0.16, 0.012, 0.12]} />
+          <meshBasicMaterial color="#fff8e0" />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
+function GateLights({ timeOfDay }: { timeOfDay: number }) {
+  const factor = outdoorLightFactor(timeOfDay)
+  const on = factor > 0
+  const intensity = factor * 1.8 // dim: gate lights are subtle
+
+  return (
+    <group>
+      <GateLightPost position={[14, 0, -2]} />
+      <GateLightPost position={[14, 0, 2]} />
+      {on && (
+        <>
+          <pointLight position={[14, 1.1, -2]} color="#ffcc66" intensity={intensity} distance={8} decay={1.8} />
+          <pointLight position={[14, 1.1, 2]} color="#ffcc66" intensity={intensity} distance={8} decay={1.8} />
+        </>
+      )}
+    </group>
+  )
+}
+
 // ── Inner scene (runs inside Canvas) ─────────────────────
 
 function Scene() {
@@ -521,9 +895,10 @@ function Scene() {
       {t.barn && <Barn timeOfDay={timeOfDay} />}
       {t.pond && <Pond timeOfDay={timeOfDay} sunPosition={sunPosition} rain={rain} rainIntensity={rainIntensity} />}
       {t.fences && <Fences />}
+      {t.fences && <GateLights timeOfDay={timeOfDay} />}
       {t.food && <FoodItems foods={foods} />}
       {t.creatures && <Creatures timeOfDay={timeOfDay} showButterflies={showButterflies} />}
-      {t.windmill && <Windmill />}
+      {t.windmill && <Windmill timeOfDay={timeOfDay} />}
       {t.hayBales && <HayBales />}
       {t.waterWell && <WaterWell />}
       {t.stonePath && <StonePath />}
@@ -553,25 +928,26 @@ function Scene() {
       {/* Post-processing */}
       {t.postProcessing && (
         <EffectComposer multisampling={0}>
+          <SMAA />
           <N8AO
             aoRadius={2.5}
             intensity={1.2}
-            distanceFalloff={0.8}
-            color="#2a1a08"
-            halfRes
+            distanceFalloff={1.0}
+            color="#1a0e04"
           />
           <Bloom
-            luminanceThreshold={0.7}
+            luminanceThreshold={0.6}
             luminanceSmoothing={0.8}
             intensity={0.4}
             mipmapBlur
             levels={4}
-            width={384}
-            height={384}
+            width={512}
+            height={512}
           />
           <BrightnessContrast brightness={0.02} contrast={0.08} />
           <HueSaturation saturation={0.08} />
-          <Vignette eskil={false} offset={0.12} darkness={0.4} />
+          <ToneMapping mode={ToneMappingMode.AGX} />
+          <Vignette eskil={false} offset={0.25} darkness={0.3} />
         </EffectComposer>
       )}
     </>
@@ -589,7 +965,7 @@ function OrbitControlsWrapper() {
       minPolarAngle={Math.PI * 0.15}
       maxPolarAngle={Math.PI * 0.45}
       minDistance={10}
-      maxDistance={30}
+      maxDistance={50}
       enablePan={false}
       enableDamping
       dampingFactor={0.08}
@@ -605,25 +981,30 @@ export function FarmScene() {
   }, [])
 
   return (
-    <Canvas
-      shadows
-      camera={{
-        position: CAMERA_POSITION,
-        fov: CAMERA_FOV,
-        near: 0.1,
-        far: 500,
-      }}
-      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
-      style={{ width: '100%', height: '100%' }}
-    >
-      <fog attach="fog" args={[initialFogColor, 25, 85]} />
+    <>
+      {profilerEnabled && <style>{`
+        .fps-stats { left: 16px !important; top: auto !important; bottom: 120px !important; }
+      `}</style>}
+      <Canvas
+        shadows={{ type: THREE.PCFShadowMap }}
+        camera={{
+          position: CAMERA_POSITION,
+          fov: CAMERA_FOV,
+          near: 0.1,
+          far: 500,
+        }}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
+        style={{ width: '100%', height: '100%' }}
+      >
+        <fog attach="fog" args={[initialFogColor, 40, 120]} />
 
-      <OrbitControlsWrapper />
+        <OrbitControlsWrapper />
 
-      <Scene />
+        <Scene />
 
-      {profilerEnabled && <Stats />}
-    </Canvas>
+        {profilerEnabled && <Stats className="fps-stats" />}
+      </Canvas>
+    </>
   )
 }
 

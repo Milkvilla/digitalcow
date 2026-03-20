@@ -1,6 +1,7 @@
 import * as THREE from 'three'
-import { useMemo } from 'react'
-import { SCENE_LAYOUT, SUNRISE_HOUR, SUNSET_HOUR } from '../engine/constants.ts'
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { SCENE_LAYOUT, SUNRISE_HOUR, SUNSET_HOUR, outdoorLightFactor } from '../engine/constants.ts'
 
 // ── Triangular prism roof geometry ──────────────────────
 
@@ -84,6 +85,35 @@ function useWoodTexture() {
   }, [])
 }
 
+function GateSpotlight({ intensity }: { intensity: number }) {
+  const spotRef = useRef<THREE.SpotLight>(null!)
+  const targetRef = useRef<THREE.Object3D>(null!)
+
+  useFrame(() => {
+    if (spotRef.current && targetRef.current) {
+      spotRef.current.target = targetRef.current
+    }
+  })
+
+  return (
+    <group>
+      {/* Target: outward from door in local +X direction */}
+      <object3D ref={targetRef} position={[8, 0, 0]} />
+      <spotLight
+        ref={spotRef}
+        position={[2.9, 3.1, 0]}
+        color="#ffcc66"
+        intensity={intensity}
+        distance={20}
+        angle={0.9}
+        penumbra={0.5}
+        decay={1.2}
+        castShadow
+      />
+    </group>
+  )
+}
+
 export default function Barn({ timeOfDay }: { timeOfDay: number }) {
   const { position, rotation } = SCENE_LAYOUT.barn
   const roofGeo = useRoofGeometry()
@@ -91,7 +121,10 @@ export default function Barn({ timeOfDay }: { timeOfDay: number }) {
 
   const isNight = timeOfDay < SUNRISE_HOUR || timeOfDay > SUNSET_HOUR
   const isEvening = timeOfDay >= SUNSET_HOUR - 2 && timeOfDay <= SUNSET_HOUR
-  const lightIntensity = isNight ? 1.8 : isEvening ? 0.8 : 0.15
+  // Interior light: off during day, gradual on from 18:30, dimmer than before
+  const interiorFactor = outdoorLightFactor(timeOfDay)
+  const lightIntensity = interiorFactor * 2.0
+  const extFactor = outdoorLightFactor(timeOfDay)
 
   return (
     <group position={position} rotation={rotation} scale={1.3}>
@@ -310,11 +343,45 @@ export default function Barn({ timeOfDay }: { timeOfDay: number }) {
         <meshStandardMaterial color="#3a1205" roughness={0.92} />
       </mesh>
 
-      {/* Roof ridge cap */}
-      <mesh position={[0, 3 + 2.2, 0]} rotation={[0, Math.PI / 2, 0]}>
-        <boxGeometry args={[4.8, 0.08, 0.2]} />
-        <meshStandardMaterial color="#2a0e04" roughness={0.85} />
-      </mesh>
+      {/* ── Solar panels on roof ─────────────────────── */}
+
+      {/* Left roof slope panels (z > 0 side) */}
+      {[0, 1, 2].map(i => {
+        const px = -0.8 + i * 1.2
+        // Roof slope: rises from z=2 at y=3 to z=0 at y=5.2
+        // Panel center at ~60% up the slope
+        const py = 3.55 + 0.65
+        const pz = 1.0 - i * 0.05
+        const slopeAngle = Math.atan2(2.2, 3.2) // roof pitch
+        return (
+          <group key={`solar-l-${i}`} position={[px, py, pz]} rotation={[slopeAngle, 0, 0]}>
+            {/* Panel frame */}
+            <mesh castShadow>
+              <boxGeometry args={[1.0, 0.04, 0.7]} />
+              <meshStandardMaterial color="#1a1a2e" metalness={0.5} roughness={0.2} />
+            </mesh>
+            {/* Glass surface */}
+            <mesh position={[0, 0.025, 0]}>
+              <boxGeometry args={[0.92, 0.01, 0.62]} />
+              <meshStandardMaterial color="#1a2744" metalness={0.8} roughness={0.1} />
+            </mesh>
+            {/* Grid lines (horizontal) */}
+            {[-0.2, 0, 0.2].map(gz => (
+              <mesh key={gz} position={[0, 0.032, gz]}>
+                <boxGeometry args={[0.92, 0.003, 0.008]} />
+                <meshStandardMaterial color="#aabbcc" metalness={0.6} roughness={0.3} />
+              </mesh>
+            ))}
+            {/* Grid lines (vertical) */}
+            {[-0.3, -0.1, 0.1, 0.3].map(gx => (
+              <mesh key={gx} position={[gx, 0.032, 0]}>
+                <boxGeometry args={[0.008, 0.003, 0.62]} />
+                <meshStandardMaterial color="#aabbcc" metalness={0.6} roughness={0.3} />
+              </mesh>
+            ))}
+          </group>
+        )
+      })}
 
       {/* Hay bale near door */}
       <mesh position={[3.5, 0.3, 1.2]} rotation={[0, 0.3, 0]} castShadow>
@@ -356,6 +423,41 @@ export default function Barn({ timeOfDay }: { timeOfDay: number }) {
         <torusGeometry args={[0.08, 0.012, 6, 10, Math.PI]} />
         <meshStandardMaterial color="#555" metalness={0.7} roughness={0.3} />
       </mesh>
+
+      {/* ── Exterior gate light ─────────────────────── */}
+
+      {/* Wall mount bracket */}
+      <mesh position={[2.56, 3.15, 0]}>
+        <boxGeometry args={[0.08, 0.08, 0.08]} />
+        <meshStandardMaterial color="#333" metalness={0.6} roughness={0.35} />
+      </mesh>
+      {/* Short arm pointing outward */}
+      <mesh position={[2.72, 3.15, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.025, 0.03, 0.25, 6]} />
+        <meshStandardMaterial color="#3a3a3a" metalness={0.7} roughness={0.3} />
+      </mesh>
+      {/* Lamp housing — tilted 60° upward outward */}
+      <group position={[2.85, 3.15, 0]} rotation={[0, 0, 1.05]}>
+        {/* Housing */}
+        <mesh>
+          <boxGeometry args={[0.22, 0.07, 0.18]} />
+          <meshStandardMaterial color="#2a2a2a" metalness={0.6} roughness={0.35} />
+        </mesh>
+        {/* Glass lens */}
+        <mesh position={[0, -0.045, 0]}>
+          <boxGeometry args={[0.18, 0.012, 0.14]} />
+          <meshStandardMaterial
+            color={extFactor > 0 ? '#fff8e0' : '#aaa'}
+            emissive={extFactor > 0 ? '#ffcc44' : '#000'}
+            emissiveIntensity={extFactor * 3.5}
+          />
+        </mesh>
+      </group>
+
+      {/* Gate spotlight — points outward (+X local = northeast world) */}
+      {extFactor > 0 && (
+        <GateSpotlight intensity={extFactor * 5.0} />
+      )}
     </group>
   )
 }

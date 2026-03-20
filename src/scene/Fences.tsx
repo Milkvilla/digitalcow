@@ -1,6 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
+import * as THREE from 'three'
 import type { Vec3 } from '../engine/types.ts'
 import { SCENE_LAYOUT } from '../engine/constants.ts'
+import { useGameStore } from '../ui/hooks.ts'
 
 interface FenceSegmentProps {
   start: Vec3
@@ -91,6 +94,91 @@ function GatePost({ position }: { position: Vec3 }) {
   )
 }
 
+// ── Animated gate door ──────────────────────────────────
+
+function GateDoor() {
+  const gates = useGameStore((s) => s.world.gates)
+  const isOpen = gates.length > 0 && gates[0].isOpen
+  const doorRef = useRef<THREE.Group>(null!)
+  const angleRef = useRef(isOpen ? -Math.PI / 2 : 0)
+
+  useFrame((_state, delta) => {
+    if (!doorRef.current) return
+    const target = isOpen ? -Math.PI / 2 : 0
+    angleRef.current += (target - angleRef.current) * Math.min(3 * delta, 1)
+    doorRef.current.rotation.y = angleRef.current
+  })
+
+  const gateWidth = 3.8 // distance between posts (z: -2 to 2) minus post thickness
+  const railColor = '#7a5230'
+  const postColor = '#6b4226'
+
+  return (
+    <group position={[14, 0, -2]}>
+      {/* Pivot at the left gate post (z = -2), swings inward */}
+      <group ref={doorRef}>
+        {/* Gate frame — vertical bars */}
+        <mesh position={[0, 0.45, gateWidth * 0.02]} castShadow>
+          <boxGeometry args={[0.06, 0.9, 0.06]} />
+          <meshStandardMaterial color={postColor} roughness={0.85} />
+        </mesh>
+        <mesh position={[0, 0.45, gateWidth * 0.98]} castShadow>
+          <boxGeometry args={[0.06, 0.9, 0.06]} />
+          <meshStandardMaterial color={postColor} roughness={0.85} />
+        </mesh>
+
+        {/* Horizontal rails */}
+        <mesh position={[0, 0.3, gateWidth / 2]} castShadow>
+          <boxGeometry args={[0.05, 0.05, gateWidth]} />
+          <meshStandardMaterial color={railColor} roughness={0.82} />
+        </mesh>
+        <mesh position={[0, 0.6, gateWidth / 2]} castShadow>
+          <boxGeometry args={[0.05, 0.05, gateWidth]} />
+          <meshStandardMaterial color={railColor} roughness={0.82} />
+        </mesh>
+        <mesh position={[0, 0.85, gateWidth / 2]} castShadow>
+          <boxGeometry args={[0.04, 0.04, gateWidth]} />
+          <meshStandardMaterial color={railColor} roughness={0.82} />
+        </mesh>
+
+        {/* Vertical slats */}
+        {[0.2, 0.4, 0.6, 0.8].map((frac) => (
+          <mesh key={frac} position={[0, 0.45, gateWidth * frac]} castShadow>
+            <boxGeometry args={[0.035, 0.65, 0.035]} />
+            <meshStandardMaterial color={railColor} roughness={0.85} />
+          </mesh>
+        ))}
+
+        {/* Diagonal brace (cross support) */}
+        <mesh
+          position={[0, 0.45, gateWidth / 2]}
+          rotation={[0, 0, Math.atan2(0.3, gateWidth)]}
+          castShadow
+        >
+          <boxGeometry args={[0.035, 0.035, gateWidth * 0.95]} />
+          <meshStandardMaterial color="#6a4a28" roughness={0.85} />
+        </mesh>
+
+        {/* Latch / handle */}
+        <mesh position={[0.05, 0.5, gateWidth * 0.92]}>
+          <boxGeometry args={[0.04, 0.08, 0.02]} />
+          <meshStandardMaterial color="#555" metalness={0.6} roughness={0.35} />
+        </mesh>
+
+        {/* Hinge rings (at pivot post) */}
+        <mesh position={[0, 0.3, 0.04]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.025, 0.006, 4, 8]} />
+          <meshStandardMaterial color="#555" metalness={0.7} roughness={0.3} />
+        </mesh>
+        <mesh position={[0, 0.7, 0.04]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.025, 0.006, 4, 8]} />
+          <meshStandardMaterial color="#555" metalness={0.7} roughness={0.3} />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
 export default function Fences() {
   return (
     <>
@@ -100,6 +188,8 @@ export default function Fences() {
       {/* Gate posts at the gap on the right side */}
       <GatePost position={[14, 0, -2]} />
       <GatePost position={[14, 0, 2]} />
+      {/* Animated gate door */}
+      <GateDoor />
     </>
   )
 }

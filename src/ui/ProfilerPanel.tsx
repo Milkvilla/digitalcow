@@ -41,6 +41,8 @@ const COMPONENTS: [string, string][] = [
   ['seasonalEffects', 'Seasonal Effects'],
 ]
 
+const PANEL_CLASS = 'profiler-panel'
+
 const panelStyle: React.CSSProperties = {
   position: 'absolute',
   top: 12,
@@ -56,7 +58,16 @@ const panelStyle: React.CSSProperties = {
   overflowY: 'auto',
   minWidth: 200,
   zIndex: 100,
+  scrollbarWidth: 'thin',
+  scrollbarColor: '#555 transparent',
 }
+
+const scrollbarCSS = `
+.${PANEL_CLASS}::-webkit-scrollbar { width: 6px; }
+.${PANEL_CLASS}::-webkit-scrollbar-track { background: transparent; }
+.${PANEL_CLASS}::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+.${PANEL_CLASS}::-webkit-scrollbar-thumb:hover { background: #777; }
+`
 
 const headerStyle: React.CSSProperties = {
   fontSize: 14,
@@ -117,7 +128,8 @@ export function ProfilerPanel() {
   const allOn = Object.values(toggles).every(Boolean)
 
   return (
-    <div style={panelStyle}>
+    <div style={panelStyle} className={PANEL_CLASS}>
+      <style>{scrollbarCSS}</style>
       <div style={headerStyle}>Scene Profiler</div>
 
       {/* Renderer stats */}

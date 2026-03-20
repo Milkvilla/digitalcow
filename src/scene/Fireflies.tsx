@@ -1,6 +1,7 @@
 import { useRef, useMemo, useLayoutEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
+import { SUNRISE_HOUR, SUNSET_HOUR } from '../engine/constants.ts'
 
 // ── Constants ────────────────────────────────────────────
 
@@ -93,12 +94,11 @@ export default function Fireflies({ timeOfDay }: { timeOfDay: number }) {
   const geometry = useMemo(() => new THREE.SphereGeometry(1, 5, 4), [])
 
   // Compute visibility opacity based on time of day
-  // Visible when timeOfDay < 6 or > 19
-  // Fade in 19-20, fade out 5-6
+  // Visible when nighttime; fade in around sunset, fade out around sunrise
   function getOpacity(tod: number): number {
-    if (tod >= 20 || tod <= 5) return 1
-    if (tod > 19 && tod < 20) return tod - 19 // 0..1
-    if (tod > 5 && tod < 6) return 6 - tod // 1..0
+    if (tod >= SUNSET_HOUR + 1 || tod <= SUNRISE_HOUR - 1) return 1
+    if (tod > SUNSET_HOUR && tod < SUNSET_HOUR + 1) return tod - SUNSET_HOUR // 0..1
+    if (tod > SUNRISE_HOUR - 1 && tod < SUNRISE_HOUR) return SUNRISE_HOUR - tod // 1..0
     return 0
   }
 

@@ -186,6 +186,8 @@ export const gameStore = createStore<GameStore>()((set, get) => {
     world: initial.world,
     events: [] as EngineEvent[],
     cameraMode: 'cinematic' as const,
+    cinematicView: false,
+    _prevCameraMode: 'cinematic' as CameraMode,
     rain: initial.rain,
     rainIntensity: initial.rainIntensity,
     firstPersonIntent: null as FirstPersonIntent | null,
@@ -450,6 +452,17 @@ export const gameStore = createStore<GameStore>()((set, get) => {
 
     setCameraMode(mode) {
       set({ cameraMode: mode })
+    },
+
+    toggleCinematicView() {
+      const state = get()
+      if (state.cinematicView) {
+        // Exit cinematic view — restore previous camera mode
+        set({ cinematicView: false, cameraMode: (state as any)._prevCameraMode || 'manual' })
+      } else {
+        // Enter cinematic view — save current camera mode, switch to cinematic
+        set({ cinematicView: true, _prevCameraMode: state.cameraMode, cameraMode: 'cinematic' } as any)
+      }
     },
 
     toggleRain() {

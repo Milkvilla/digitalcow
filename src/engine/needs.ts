@@ -48,9 +48,11 @@ export function decayNeeds(
 ): void {
   const needs = cow.needs
   const season = SEASON_MODIFIERS[world.season] || SEASON_MODIFIERS[0]
+  const isSleeping = cow.behavior === 'sleeping'
+  const sleepSlowdown = isSleeping ? 0.15 : 1 // ~7x slower decay while sleeping
 
   // Base decay with seasonal modifiers
-  needs.hunger = clamp(needs.hunger + HUNGER_DECAY_PER_SEC * season.hungerMultiplier * dt, 0, 100)
+  needs.hunger = clamp(needs.hunger + HUNGER_DECAY_PER_SEC * season.hungerMultiplier * sleepSlowdown * dt, 0, 100)
   needs.energy = clamp(needs.energy - ENERGY_DECAY_PER_SEC * season.energyCostMultiplier * dt, 0, 100)
 
   // Happiness decay — extra penalty when health is low
@@ -61,7 +63,7 @@ export function decayNeeds(
   needs.happiness = clamp(needs.happiness - happinessDecay * dt, 0, 100)
 
   // Thirst decay — rain slows it down
-  let thirstRate = THIRST_DECAY_PER_SEC
+  let thirstRate = THIRST_DECAY_PER_SEC * sleepSlowdown
   if (rain) {
     thirstRate *= (1 - RAIN_THIRST_SLOW_FACTOR * rainIntensity)
   }
@@ -215,7 +217,12 @@ export function updateHealth(
   const isWellFed = needs.hunger < 30 && needs.thirst < 30
   const isRested = needs.energy > 50
   if (isWellFed && isRested) {
-    healthDelta += HEALTH_RECOVERY_RATE * dt
+    healthDelta += HEALTH_RECOVERY_RATE * 2 * dt
+  }
+
+  // Passive recovery — health slowly recovers when no penalties are active
+  if (healthDelta <= 0 && needs.hunger <= 70 && needs.thirst <= 70 && needs.energy >= 20) {
+    healthDelta = HEALTH_RECOVERY_RATE * dt
   }
 
   cow.health = clamp(cow.health + healthDelta, 0, 100)

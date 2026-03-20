@@ -92,6 +92,7 @@ export default function CloudShadows() {
             opacity={shadow.opacity}
             depthWrite={false}
             blending={THREE.MultiplyBlending}
+            premultipliedAlpha
           />
         </mesh>
       ))}

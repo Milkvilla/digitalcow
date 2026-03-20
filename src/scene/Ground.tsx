@@ -231,23 +231,54 @@ function createUndulatingPlane(width: number, depth: number, segX: number, segZ:
     // Map to 0..1 space for noise
     const u = (px / width + 0.5)
     const v = (py / depth + 0.5)
-    // Gentle rolling hills
-    const hill = noise(u * 6, v * 6) * 0.18 + noise2(u * 14, v * 14) * 0.06
+    // Gentle rolling hills (subtle — avoid burying ground objects)
+    const hill = noise(u * 6, v * 6) * 0.07 + noise2(u * 14, v * 14) * 0.025
     // Flatten center more (where cow walks)
     const distFromCenter = Math.sqrt((u - 0.5) ** 2 + (v - 0.5) ** 2) * 2
     let flattenFactor = Math.max(0, 1 - (1 - distFromCenter) * 0.6)
 
-    // Suppress hills near ponds, barn, trough — and optionally dip
+    const worldX = px
+    const worldZ = -py
+
+    // Suppress hills near structures — and optionally dip
     let dip = 0
     for (const zone of FLAT_ZONES) {
-      // plane (px, py) → world (px, _, -py)
-      const dx = px - zone.wx
-      const dz = (-py) - zone.wz
+      const dx = worldX - zone.wx
+      const dz = worldZ - zone.wz
       const dist = Math.sqrt(dx * dx + dz * dz)
       if (dist < zone.r) {
         const blend = 1 - smoothstep(zone.r * 0.5, zone.r, dist)
         flattenFactor *= (1 - blend)
         dip += zone.dip * blend
+      }
+    }
+
+    // Flatten along stone path corridor
+    for (const [pathX, pathZ] of PATH_POINTS) {
+      const dx = worldX - pathX
+      const dz = worldZ - pathZ
+      const dist = Math.sqrt(dx * dx + dz * dz)
+      const pathRadius = 1.8
+      if (dist < pathRadius) {
+        const blend = 1 - smoothstep(pathRadius * 0.4, pathRadius, dist)
+        flattenFactor *= (1 - blend)
+      }
+    }
+
+    // Flatten along fence perimeter
+    const fenceHalf = 14
+    const fenceZMin = -12, fenceZMax = 14
+    const fenceWidth = 1.5
+    const edgeDists = [
+      Math.abs(worldX - fenceHalf),      // right fence (x=14)
+      Math.abs(worldX + fenceHalf),      // left fence (x=-14)
+      Math.abs(worldZ - fenceZMax),      // front fence (z=14)
+      Math.abs(worldZ - fenceZMin),      // back fence (z=-12)
+    ]
+    for (const ed of edgeDists) {
+      if (ed < fenceWidth) {
+        const blend = 1 - smoothstep(fenceWidth * 0.3, fenceWidth, ed)
+        flattenFactor *= (1 - blend)
       }
     }
 

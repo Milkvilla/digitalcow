@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Vec3 } from '../engine/types.ts'
 import { SCENE_LAYOUT } from '../engine/constants.ts'
+import { gameStore } from '../ui/hooks.ts'
 
 // ── Shared merged material (one per tree, uses vertex colors) ──
 
@@ -368,6 +369,149 @@ function MangoTree({ position }: { position: Vec3 }) {
   )
 }
 
+// ── Falling leaves when cow brushes past trees ─────────
+
+const MAX_LEAVES = 60
+const LEAF_COLORS = [
+  new THREE.Color('#4a9e35'), new THREE.Color('#66b34a'),
+  new THREE.Color('#8fb83e'), new THREE.Color('#c4a840'),
+  new THREE.Color('#a88030'), new THREE.Color('#cc6633'),
+]
+
+interface LeafParticle {
+  x: number; y: number; z: number
+  vx: number; vy: number; vz: number
+  rotX: number; rotY: number; rotZ: number
+  spinX: number; spinZ: number
+  age: number; maxAge: number
+  colorIndex: number
+}
+
+function FallingLeaves() {
+  const meshRef = useRef<THREE.InstancedMesh>(null!)
+  const particles = useRef<LeafParticle[]>([])
+  const dummy = useMemo(() => new THREE.Object3D(), [])
+  const colorAttr = useRef<THREE.InstancedBufferAttribute | null>(null)
+
+  const treePositions = useMemo(() => {
+    const all: Vec3[] = SCENE_LAYOUT.trees.map(t => t.position)
+    all.push([12, 0, 12]) // mango tree
+    return all
+  }, [])
+
+  useFrame((_state, delta) => {
+    if (!meshRef.current) return
+    const dt = Math.min(delta, 0.05)
+    const store = gameStore.getState()
+    const cowPos = store.cow.position
+
+    // Spawn leaves near cow
+    for (const treePos of treePositions) {
+      const dx = cowPos[0] - treePos[0]
+      const dz = cowPos[2] - treePos[2]
+      const dist = Math.sqrt(dx * dx + dz * dz)
+
+      if (dist < 1.8 && particles.current.length < MAX_LEAVES) {
+        // Spawn 1-2 leaves per frame when close
+        const count = Math.random() < 0.3 ? 2 : 1
+        for (let i = 0; i < count; i++) {
+          if (particles.current.length >= MAX_LEAVES) break
+          particles.current.push({
+            x: treePos[0] + (Math.random() - 0.5) * 1.2,
+            y: 1.5 + Math.random() * 2.0, // canopy height
+            z: treePos[2] + (Math.random() - 0.5) * 1.2,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: -0.3 - Math.random() * 0.3,
+            vz: (Math.random() - 0.5) * 0.4,
+            rotX: Math.random() * Math.PI * 2,
+            rotY: Math.random() * Math.PI * 2,
+            rotZ: Math.random() * Math.PI * 2,
+            spinX: (Math.random() - 0.5) * 3,
+            spinZ: (Math.random() - 0.5) * 3,
+            age: 0,
+            maxAge: 2 + Math.random() * 2,
+            colorIndex: Math.floor(Math.random() * LEAF_COLORS.length),
+          })
+        }
+      }
+    }
+
+    // Update particles
+    const arr = particles.current
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const p = arr[i]
+      p.age += dt
+      if (p.age > p.maxAge || p.y < 0) {
+        arr.splice(i, 1)
+        continue
+      }
+
+      // Drift with wind-like sway
+      p.x += p.vx * dt + Math.sin(p.age * 2 + p.rotY) * 0.1 * dt
+      p.y += p.vy * dt
+      p.z += p.vz * dt + Math.cos(p.age * 1.7 + p.rotX) * 0.08 * dt
+      p.rotX += p.spinX * dt
+      p.rotZ += p.spinZ * dt
+
+      // Slow down horizontal drift
+      p.vx *= 0.995
+      p.vz *= 0.995
+      // Flutter — oscillate fall speed
+      p.vy = -0.3 + Math.sin(p.age * 4) * 0.08
+    }
+
+    // Update instanced mesh
+    const colors = new Float32Array(MAX_LEAVES * 3)
+    for (let i = 0; i < MAX_LEAVES; i++) {
+      if (i < arr.length) {
+        const p = arr[i]
+        dummy.position.set(p.x, p.y, p.z)
+        dummy.rotation.set(p.rotX, p.rotY, p.rotZ)
+        const fadeScale = p.age > p.maxAge - 0.5 ? Math.max(0, 1 - (p.age - (p.maxAge - 0.5)) * 2) : 1
+        dummy.scale.setScalar(0.04 * fadeScale)
+        dummy.updateMatrix()
+        meshRef.current.setMatrixAt(i, dummy.matrix)
+
+        const c = LEAF_COLORS[p.colorIndex]
+        colors[i * 3] = c.r
+        colors[i * 3 + 1] = c.g
+        colors[i * 3 + 2] = c.b
+      } else {
+        dummy.position.set(0, -10, 0)
+        dummy.scale.setScalar(0)
+        dummy.updateMatrix()
+        meshRef.current.setMatrixAt(i, dummy.matrix)
+        colors[i * 3] = 0
+        colors[i * 3 + 1] = 0
+        colors[i * 3 + 2] = 0
+      }
+    }
+
+    meshRef.current.instanceMatrix.needsUpdate = true
+
+    // Update instance colors
+    if (!colorAttr.current) {
+      colorAttr.current = new THREE.InstancedBufferAttribute(colors, 3)
+      meshRef.current.instanceColor = colorAttr.current
+    } else {
+      colorAttr.current.array = colors
+      colorAttr.current.needsUpdate = true
+    }
+  })
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, MAX_LEAVES]}>
+      <planeGeometry args={[1, 1]} />
+      <meshStandardMaterial
+        vertexColors
+        side={THREE.DoubleSide}
+        roughness={0.7}
+        flatShading
+      />
+    </instancedMesh>
+  )
+}
+
 // ── Trees collection ────────────────────────────────────
 
 export default function Trees() {
@@ -392,6 +536,7 @@ export default function Trees() {
         />
       ))}
       <MangoTree position={[12, 0, 12]} />
+      <FallingLeaves />
     </>
   )
 }

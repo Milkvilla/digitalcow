@@ -7,21 +7,21 @@ export const MAX_SUBSTEPS_PER_FRAME = 20    // safety cap
 
 // ── Need Decay Rates (per sim-second) ───────────────────
 
-export const HUNGER_DECAY_PER_SEC = 0.5     // hunger 0→100 in ~200s
-export const ENERGY_DECAY_PER_SEC = 0.3     // energy 100→0 in ~333s
+export const HUNGER_DECAY_PER_SEC = 0.15    // hunger 0→100 in ~667s
+export const ENERGY_DECAY_PER_SEC = 0.1     // energy 100→0 in ~1000s
 export const HAPPINESS_DECAY_PER_SEC = 0.2  // happiness 100→0 in ~500s
-export const THIRST_DECAY_PER_SEC = 0.4     // thirst 0→100 in ~250s
+export const THIRST_DECAY_PER_SEC = 0.12    // thirst 0→100 in ~833s
 
 // ── Behavior Effects (per sim-second) ───────────────────
 
 export const EATING_HUNGER_REDUCTION = 15
 export const EATING_FOOD_CONSUMPTION = 10
 export const GRAZING_HUNGER_REDUCTION = 5
-export const SLEEPING_ENERGY_GAIN = 10
-export const RUNNING_ENERGY_COST = 8
+export const SLEEPING_ENERGY_GAIN = 3.5
+export const RUNNING_ENERGY_COST = 2.7
 export const RUNNING_HAPPINESS_GAIN = 3
 export const PLAYING_HAPPINESS_GAIN = 5
-export const PLAYING_ENERGY_COST = 6
+export const PLAYING_ENERGY_COST = 2
 export const PET_HAPPINESS_BOOST = 15
 export const PET_TRUST_BOOST = 3
 
@@ -100,6 +100,14 @@ export const EXCLUSION_ZONES: ExclusionZone[] = [
   { center: [-10, 8], radius: 6.5 },   // barn scaled 1.3x (larger to prevent body clipping through walls)
   { center: [-8, -5], radius: 3.5 },   // pond
   { center: [-6, 5], radius: 1.5 },    // trough
+  { center: [8, 13], radius: 1.2 },    // windmill
+  { center: [4, 3], radius: 0.5 },     // scarecrow
+  { center: [12, 12], radius: 0.6 },   // mango tree
+  // Tree trunks
+  ...SCENE_LAYOUT.trees.map(t => ({
+    center: [t.position[0], t.position[2]] as [number, number],
+    radius: 0.4,
+  })),
 ]
 
 // ── Grass ───────────────────────────────────────────────
@@ -112,8 +120,29 @@ export const GRASS_MAX_HEIGHT = 0.24
 // ── Time / Sun ──────────────────────────────────────────
 
 export const SUNRISE_HOUR = 6
-export const SUNSET_HOUR = 20
+export const SUNSET_HOUR = 19
 export const SUN_DISTANCE = 50
+
+/** Outdoor light intensity curve: gradual on 1.5h before sunset, full by sunset+1h, gradual dim after midnight */
+export function outdoorLightFactor(timeOfDay: number): number {
+  const lightsOn = SUNSET_HOUR - 1.5       // lights start turning on 1.5h before sunset
+  const fullBright = SUNSET_HOUR + 1        // full brightness 1h after sunset
+  // Daytime: off
+  if (timeOfDay >= SUNRISE_HOUR && timeOfDay < lightsOn) return 0
+  // Ramp up to full brightness
+  if (timeOfDay >= lightsOn && timeOfDay < fullBright) {
+    const t = (timeOfDay - lightsOn) / (fullBright - lightsOn)
+    return t * t * (3 - 2 * t) // smoothstep
+  }
+  // After full brightness until midnight: gradual dim from 1.0→0.35
+  if (timeOfDay >= fullBright) {
+    const t = (timeOfDay - fullBright) / (24 - fullBright)
+    return 1.0 - 0.65 * t * t * (3 - 2 * t)
+  }
+  // 0:00–sunrise: gradual dim from 0.35→0.15
+  const t = timeOfDay / SUNRISE_HOUR
+  return 0.35 - 0.2 * t * t * (3 - 2 * t)
+}
 
 // ── Food Types ───────────────────────────────────────────
 
@@ -158,7 +187,7 @@ export const SETTLE_DURATION = 3                // seconds to settle before slee
 
 export const JUMP_DURATION = 0.8         // sim-seconds
 export const JUMP_HAPPINESS_BOOST = 8
-export const JUMP_ENERGY_COST = 5
+export const JUMP_ENERGY_COST = 1.7
 
 // ── Thirst ──────────────────────────────────────────────
 

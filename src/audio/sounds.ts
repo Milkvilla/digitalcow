@@ -1,4 +1,5 @@
 import type { EngineEvent, CowBehavior } from '../engine/types'
+import { SUNRISE_HOUR, SUNSET_HOUR } from '../engine/constants'
 
 /**
  * Procedural audio engine for the Digital Cow farm simulation.
@@ -662,7 +663,7 @@ class AudioEngine {
    */
   setAmbientForTime(timeOfDay: number): void {
     if (!this.initialized) return
-    const isDay = timeOfDay >= 6 && timeOfDay < 20
+    const isDay = timeOfDay >= SUNRISE_HOUR && timeOfDay < SUNSET_HOUR
     const target = isDay ? 'day' : 'night'
     if (target === this.currentAmbient) return
 

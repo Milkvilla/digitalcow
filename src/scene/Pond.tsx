@@ -118,12 +118,33 @@ const waterFragmentShader = /* glsl */ `
   varying vec3 vNormal;
   varying vec3 vViewDir;
 
+  // Simplex-like hash for caustic pattern
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  float voronoiDist(vec2 p) {
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+    float d = 1.0;
+    for (int x = -1; x <= 1; x++) {
+      for (int y = -1; y <= 1; y++) {
+        vec2 neighbor = vec2(float(x), float(y));
+        vec2 point = vec2(hash(ip + neighbor), hash(ip + neighbor + 42.0));
+        point = 0.5 + 0.5 * sin(uTime * 0.6 + 6.2831 * point);
+        vec2 diff = neighbor + point - fp;
+        d = min(d, dot(diff, diff));
+      }
+    }
+    return sqrt(d);
+  }
+
   void main() {
-    // Rich depth-based water colors
-    vec3 deepColor = vec3(0.02, 0.12, 0.22);
-    vec3 midColor = vec3(0.05, 0.22, 0.32);
-    vec3 shallowColor = vec3(0.12, 0.38, 0.48);
-    vec3 shoreColor = vec3(0.20, 0.42, 0.38);
+    // Clearer water colors — lighter to see fish beneath
+    vec3 deepColor = vec3(0.06, 0.18, 0.28);
+    vec3 midColor = vec3(0.10, 0.28, 0.38);
+    vec3 shallowColor = vec3(0.18, 0.42, 0.48);
+    vec3 shoreColor = vec3(0.24, 0.46, 0.42);
 
     // Distance from center for depth gradient (smooth multi-stop)
     float dist = length(vUv - 0.5) * 2.0;
@@ -135,40 +156,47 @@ const waterFragmentShader = /* glsl */ `
     waterColor = mix(waterColor, shoreColor, shallowToShore);
 
     // Time-of-day water tint
-    waterColor = mix(waterColor, uWaterReflect, 0.2);
+    waterColor = mix(waterColor, uWaterReflect, 0.25);
 
     // Fresnel — more reflective at glancing angles
-    float fresnel = pow(1.0 - max(dot(vViewDir, vNormal), 0.0), 4.0);
-    fresnel = clamp(fresnel, 0.04, 0.9);
+    float fresnel = pow(1.0 - max(dot(vViewDir, vNormal), 0.0), 4.5);
+    fresnel = clamp(fresnel, 0.03, 0.85);
 
     // Reflection color (sky + sun tint)
     float brightness = clamp(uSunIntensity, 0.0, 1.5);
-    vec3 reflectionColor = uSkyColor * 0.7 + vec3(0.12, 0.18, 0.25) * brightness;
+    vec3 reflectionColor = uSkyColor * 0.75 + vec3(0.14, 0.20, 0.28) * brightness;
 
     // Reduce Fresnel at night
     float nightFresnel = fresnel * (0.3 + 0.7 * min(brightness, 1.0));
     vec3 color = mix(waterColor, reflectionColor, nightFresnel);
 
-    // Specular highlight — tighter and brighter
+    // Specular highlight — tight sun sparkle
     vec3 halfVec = normalize(vViewDir + uSunDir);
-    float specular = pow(max(dot(vNormal, halfVec), 0.0), 96.0);
-    color += uSunColor * specular * 0.7 * brightness;
+    float specular = pow(max(dot(vNormal, halfVec), 0.0), 128.0);
+    color += uSunColor * specular * 0.9 * brightness;
 
     // Secondary broad specular for soft sheen
     float specBroad = pow(max(dot(vNormal, halfVec), 0.0), 16.0);
-    color += uSunColor * specBroad * 0.08 * brightness;
+    color += uSunColor * specBroad * 0.1 * brightness;
 
-    // Multi-frequency caustic shimmer
-    float caustic1 = sin(vWorldPos.x * 8.0 + uTime * 2.0)
-                   * cos(vWorldPos.z * 6.0 + uTime * 1.7);
-    float caustic2 = sin(vWorldPos.x * 14.0 - uTime * 3.0)
-                   * cos(vWorldPos.z * 11.0 + uTime * 2.3);
-    float caustic = caustic1 * 0.04 + caustic2 * 0.02;
-    color += vec3(caustic * 0.8, caustic, caustic * 1.2);
+    // Animated voronoi caustics (realistic water pattern)
+    vec2 causticUV = vWorldPos.xz * 2.5;
+    float v1 = voronoiDist(causticUV + vec2(uTime * 0.15, uTime * 0.1));
+    float v2 = voronoiDist(causticUV * 1.4 + vec2(-uTime * 0.12, uTime * 0.08));
+    float caustic = smoothstep(0.15, 0.0, v1) * 0.5 + smoothstep(0.12, 0.0, v2) * 0.3;
+    // Depth-attenuated: caustics stronger in shallow water
+    float depthAtten = mix(0.3, 1.0, dist);
+    color += vec3(caustic * 0.7, caustic * 0.85, caustic) * depthAtten * brightness * 0.35;
 
-    // Edge fade
-    float edgeFade = smoothstep(1.0, 0.82, dist);
-    float alpha = 0.78 * edgeFade + 0.18;
+    // Multi-frequency shimmer highlights
+    float shimmer1 = sin(vWorldPos.x * 12.0 + uTime * 2.5) * cos(vWorldPos.z * 10.0 + uTime * 1.9);
+    float shimmer2 = sin(vWorldPos.x * 18.0 - uTime * 3.2) * cos(vWorldPos.z * 15.0 + uTime * 2.7);
+    float shimmer = max(shimmer1, 0.0) * 0.03 + max(shimmer2, 0.0) * 0.015;
+    color += uSunColor * shimmer * brightness;
+
+    // Edge fade — transparent to reveal fish below
+    float edgeFade = smoothstep(1.0, 0.85, dist);
+    float alpha = 0.42 * edgeFade + 0.12;
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -257,6 +285,169 @@ function LilyFlower({ x, z }: { x: number; z: number }) {
         <sphereGeometry args={[0.025, 6, 6]} />
         <meshStandardMaterial color="#e8c820" roughness={0.3} />
       </mesh>
+    </group>
+  )
+}
+
+// ── Pond fish ──────────────────────────────────────────
+
+interface FishDef {
+  orbitRadius: number
+  speed: number
+  phase: number
+  depth: number
+  bodyColor: string
+  bellyColor: string
+  accentColor: string
+  scale: number
+  wiggleSpeed: number
+}
+
+const FISH_DEFS: FishDef[] = [
+  { orbitRadius: 1.2, speed: 0.35, phase: 0, depth: -0.035, bodyColor: '#d4842a', bellyColor: '#f0c870', accentColor: '#e8a040', scale: 0.7, wiggleSpeed: 10 },
+  { orbitRadius: 1.8, speed: 0.22, phase: Math.PI * 0.8, depth: -0.045, bodyColor: '#cc4433', bellyColor: '#ee9988', accentColor: '#ff6644', scale: 0.9, wiggleSpeed: 7 },
+  { orbitRadius: 0.8, speed: 0.4, phase: Math.PI * 1.5, depth: -0.03, bodyColor: '#e8a848', bellyColor: '#f8d888', accentColor: '#ffcc55', scale: 0.55, wiggleSpeed: 12 },
+  { orbitRadius: 2.1, speed: 0.18, phase: Math.PI * 0.3, depth: -0.05, bodyColor: '#667788', bellyColor: '#99aabb', accentColor: '#8899aa', scale: 1.0, wiggleSpeed: 6 },
+  { orbitRadius: 1.5, speed: 0.28, phase: Math.PI * 1.1, depth: -0.04, bodyColor: '#d46830', bellyColor: '#f0a870', accentColor: '#ee8844', scale: 0.65, wiggleSpeed: 9 },
+  { orbitRadius: 1.0, speed: 0.32, phase: Math.PI * 0.5, depth: -0.032, bodyColor: '#f0c030', bellyColor: '#fff0aa', accentColor: '#ffd844', scale: 0.5, wiggleSpeed: 11 },
+  { orbitRadius: 1.9, speed: 0.2, phase: Math.PI * 1.7, depth: -0.048, bodyColor: '#994422', bellyColor: '#cc8855', accentColor: '#bb6633', scale: 0.85, wiggleSpeed: 8 },
+]
+
+function PondFish({ radius }: { radius: number }) {
+  const fishRefs = useRef<(THREE.Group | null)[]>([])
+  const accum = useRef(FISH_DEFS.map(d => d.phase))
+  const prevPos = useRef(FISH_DEFS.map(() => ({ x: 0, z: 0 })))
+
+  useFrame((_state, delta) => {
+    const dt = Math.min(delta, 0.05)
+
+    for (let i = 0; i < FISH_DEFS.length; i++) {
+      const fish = FISH_DEFS[i]
+      const group = fishRefs.current[i]
+      if (!group) continue
+
+      accum.current[i] += dt * fish.speed
+      const a = accum.current[i]
+
+      // Figure-8 path within pond
+      const wobble = Math.sin(a * 1.3 + fish.phase) * 0.15
+      let fx = Math.cos(a) * fish.orbitRadius + Math.sin(a * 0.6) * fish.orbitRadius * 0.25
+      let fz = Math.sin(a) * fish.orbitRadius + Math.cos(a * 0.4) * fish.orbitRadius * 0.2
+
+      // Clamp to pond
+      const dist = Math.sqrt(fx * fx + fz * fz)
+      const maxR = radius - 0.6
+      if (dist > maxR) {
+        fx = (fx / dist) * maxR
+        fz = (fz / dist) * maxR
+      }
+
+      // Depth wobble — fish bob up and down slightly
+      const depthWobble = Math.sin(a * 0.7 + fish.phase * 2) * 0.008
+      group.position.set(fx, fish.depth + wobble * 0.005 + depthWobble, fz)
+
+      // Face movement direction using actual delta position
+      const prev = prevPos.current[i]
+      const dx = fx - prev.x
+      const dz = fz - prev.z
+      if (dx * dx + dz * dz > 0.000001) {
+        const targetAngle = Math.atan2(dx, dz)
+        // Smooth rotation
+        let angleDiff = targetAngle - group.rotation.y
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2
+        group.rotation.y += angleDiff * Math.min(dt * 4, 1)
+      }
+      prev.x = fx
+      prev.z = fz
+
+      // Body undulation — animate tail section
+      const wiggle = Math.sin(a * fish.wiggleSpeed) * 0.25
+      const tailGroup = group.children[5] as THREE.Group | undefined // tail group
+      if (tailGroup?.isObject3D) {
+        tailGroup.rotation.y = wiggle
+      }
+      // Pectoral fin flutter
+      const leftFin = group.children[3] as THREE.Mesh | undefined
+      const rightFin = group.children[4] as THREE.Mesh | undefined
+      if (leftFin?.isObject3D) {
+        leftFin.rotation.z = -0.4 + Math.sin(a * fish.wiggleSpeed * 1.5) * 0.3
+      }
+      if (rightFin?.isObject3D) {
+        rightFin.rotation.z = 0.4 - Math.sin(a * fish.wiggleSpeed * 1.5) * 0.3
+      }
+    }
+  })
+
+  return (
+    <group>
+      {FISH_DEFS.map((fish, i) => (
+        <group
+          key={i}
+          ref={(el) => { fishRefs.current[i] = el }}
+          scale={[fish.scale, fish.scale, fish.scale]}
+        >
+          {/* [0] Fish body — elongated torpedo shape */}
+          <mesh scale={[1.6, 0.85, 1]}>
+            <sphereGeometry args={[0.06, 8, 6]} />
+            <meshStandardMaterial color={fish.bodyColor} flatShading roughness={0.25} metalness={0.15} />
+          </mesh>
+          {/* [1] Belly — lighter underside */}
+          <mesh position={[0, -0.015, 0]} scale={[1.4, 0.5, 0.85]}>
+            <sphereGeometry args={[0.055, 6, 4, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2]} />
+            <meshStandardMaterial color={fish.bellyColor} flatShading roughness={0.3} metalness={0.1} />
+          </mesh>
+          {/* [2] Dorsal fin (top) — taller, more defined */}
+          <mesh position={[-0.01, 0.05, 0]} rotation={[0, 0, -0.15]} scale={[1.3, 1, 0.2]}>
+            <coneGeometry args={[0.02, 0.04, 4]} />
+            <meshStandardMaterial color={fish.accentColor} flatShading roughness={0.35} />
+          </mesh>
+          {/* [3] Left pectoral fin */}
+          <mesh position={[0.03, -0.01, 0.035]} rotation={[-0.3, 0, -0.4]} scale={[0.8, 0.3, 1]}>
+            <coneGeometry args={[0.02, 0.035, 3]} />
+            <meshStandardMaterial color={fish.accentColor} flatShading roughness={0.35} side={THREE.DoubleSide} />
+          </mesh>
+          {/* [4] Right pectoral fin */}
+          <mesh position={[0.03, -0.01, -0.035]} rotation={[0.3, 0, 0.4]} scale={[0.8, 0.3, 1]}>
+            <coneGeometry args={[0.02, 0.035, 3]} />
+            <meshStandardMaterial color={fish.accentColor} flatShading roughness={0.35} side={THREE.DoubleSide} />
+          </mesh>
+          {/* [5] Tail group — animated */}
+          <group position={[-0.1, 0, 0]}>
+            {/* Tail peduncle (narrow section) */}
+            <mesh scale={[0.8, 0.5, 0.5]}>
+              <sphereGeometry args={[0.03, 5, 4]} />
+              <meshStandardMaterial color={fish.bodyColor} flatShading roughness={0.25} metalness={0.15} />
+            </mesh>
+            {/* Tail fin — forked V shape */}
+            <mesh position={[-0.035, 0.02, 0]} rotation={[0, 0, -0.5]} scale={[0.7, 1, 0.2]}>
+              <coneGeometry args={[0.025, 0.05, 3]} />
+              <meshStandardMaterial color={fish.accentColor} flatShading roughness={0.3} side={THREE.DoubleSide} />
+            </mesh>
+            <mesh position={[-0.035, -0.02, 0]} rotation={[0, 0, 0.5]} scale={[0.7, 1, 0.2]}>
+              <coneGeometry args={[0.025, 0.05, 3]} />
+              <meshStandardMaterial color={fish.accentColor} flatShading roughness={0.3} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+          {/* Eyes — with highlight */}
+          <mesh position={[0.075, 0.015, 0.025]}>
+            <sphereGeometry args={[0.008, 5, 5]} />
+            <meshStandardMaterial color="#111" roughness={0.1} metalness={0.3} />
+          </mesh>
+          <mesh position={[0.077, 0.018, 0.024]}>
+            <sphereGeometry args={[0.003, 4, 4]} />
+            <meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={0.3} />
+          </mesh>
+          <mesh position={[0.075, 0.015, -0.025]}>
+            <sphereGeometry args={[0.008, 5, 5]} />
+            <meshStandardMaterial color="#111" roughness={0.1} metalness={0.3} />
+          </mesh>
+          <mesh position={[0.077, 0.018, -0.024]}>
+            <sphereGeometry args={[0.003, 4, 4]} />
+            <meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={0.3} />
+          </mesh>
+        </group>
+      ))}
     </group>
   )
 }
@@ -382,11 +573,34 @@ export default function Pond({ timeOfDay, sunPosition, rain = false, rainIntensi
       {/* Rain splashes */}
       {rain && <PondSplashes radius={radius} intensity={rainIntensity} />}
 
-      {/* Pond bed (darker underneath, gradient) */}
+      {/* Pond bed — lighter sandy tone so fish are visible through water */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, 0]}>
         <circleGeometry args={[radius - 0.2, 32]} />
-        <meshStandardMaterial color="#0f2828" roughness={1} />
+        <meshStandardMaterial color="#2a4a44" roughness={0.9} />
       </mesh>
+      {/* Scattered pebbles on pond bed */}
+      {useMemo(() => {
+        const bedPebbles: { x: number; z: number; s: number; color: string }[] = []
+        for (let i = 0; i < 12; i++) {
+          const angle = (i / 12) * Math.PI * 2 + (((i * 7 + 3) % 11) / 11 - 0.5) * 0.6
+          const r = ((i * 13 + 5) % 9) / 9 * (radius - 0.8) + 0.3
+          bedPebbles.push({
+            x: Math.cos(angle) * r,
+            z: Math.sin(angle) * r,
+            s: 0.02 + ((i * 7 + 2) % 5) / 5 * 0.03,
+            color: i % 3 === 0 ? '#3a5550' : i % 3 === 1 ? '#4a5a4a' : '#354840',
+          })
+        }
+        return bedPebbles
+      }, [radius]).map((p, i) => (
+        <mesh key={`bed-peb-${i}`} position={[p.x, -0.055, p.z]} scale={[p.s * 1.5, p.s * 0.4, p.s]}>
+          <dodecahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial color={p.color} flatShading roughness={0.9} />
+        </mesh>
+      ))}
+
+      {/* Fish swimming below surface */}
+      <PondFish radius={radius} />
 
       {/* Lily pads */}
       <LilyPad x={-1.2} z={0.8} size={0.28} rotation={0.5} />

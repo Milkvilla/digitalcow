@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { gameStore } from '../ui/hooks.ts'
-import { EXCLUSION_ZONES } from '../engine/constants.ts'
+import { EXCLUSION_ZONES, SUNRISE_HOUR, SUNSET_HOUR } from '../engine/constants.ts'
 
 // ── Constants ───────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export default function FarmDog() {
     const dt = Math.min(delta, 0.05)
     const s = state.current
     const timeOfDay = gameStore.getState().world.timeOfDay
-    const isNight = timeOfDay < 6 || timeOfDay > 20
+    const isNight = timeOfDay < SUNRISE_HOUR || timeOfDay > SUNSET_HOUR
 
     // ── Timer-based state transitions ──────────────
     s.timer -= dt

@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 
 // ── Constants ────────────────────────────────────────────
 
-const GARDEN_POS: [number, number, number] = [-5, 0, 13]
+const GARDEN_POS: [number, number, number] = [-5, 0, 12.5]
 const ROWS = 3
 const COLS = 4
 const PLOT_SPACING = 0.8

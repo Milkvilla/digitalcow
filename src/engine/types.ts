@@ -218,6 +218,7 @@ export interface GameStore {
   world: WorldState
   events: EngineEvent[]
   cameraMode: CameraMode
+  cinematicView: boolean
   rain: boolean
   rainIntensity: number  // 0.0 – 1.0
   firstPersonIntent: FirstPersonIntent | null
@@ -232,6 +233,7 @@ export interface GameStore {
   togglePause: () => void
   toggleButterflies: () => void
   setCameraMode: (mode: CameraMode) => void
+  toggleCinematicView: () => void
   toggleRain: () => void
   setRainIntensity: (intensity: number) => void
   setBreed: (breed: BreedId) => void

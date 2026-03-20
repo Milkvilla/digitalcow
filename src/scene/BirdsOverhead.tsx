@@ -2,6 +2,7 @@ import { useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { gameStore } from '../ui/hooks.ts'
+import { SUNRISE_HOUR, SUNSET_HOUR } from '../engine/constants.ts'
 
 // ── Constants ────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export default function BirdsOverhead() {
     if (!meshRef.current) return
     const t = _state.clock.elapsedTime
     const timeOfDay = gameStore.getState().world.timeOfDay
-    const isDay = timeOfDay >= 6 && timeOfDay <= 20
+    const isDay = timeOfDay >= SUNRISE_HOUR && timeOfDay <= SUNSET_HOUR
 
     let idx = 0
 
