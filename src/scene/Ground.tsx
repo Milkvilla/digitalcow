@@ -190,6 +190,34 @@ function createBumpTexture(): THREE.CanvasTexture {
   return tex
 }
 
+// ── Flat zones: (world X, world Z, radius, depression) ──
+// PlaneGeometry XY → world XZ after rotation. Plane (x, y) → world (x, ?, -y).
+const FLAT_ZONES = [
+  { wx: -8,  wz: -5, r: 4.5, dip: -0.04 },   // pond — slight dip
+  { wx: -10, wz: 8,  r: 7.0, dip: 0 },        // barn
+  { wx: -6,  wz: 5,  r: 2.0, dip: 0 },        // trough
+  { wx: 10,  wz: 10, r: 3.0, dip: 0 },        // windmill
+  { wx: 3,   wz: 7,  r: 2.5, dip: 0 },        // water well
+  { wx: 4,   wz: 3,  r: 1.5, dip: 0 },        // scarecrow
+  { wx: -12, wz: 6,  r: 2.5, dip: 0 },        // hay bales
+  { wx: 5,   wz: 5,  r: 2.5, dip: 0 },        // flower patch 1
+  { wx: -3,  wz: 11, r: 2.5, dip: 0 },        // flower patch 2
+  { wx: 6,   wz: -10,r: 2.5, dip: 0 },        // flower patch 3
+  { wx: -13, wz: 2,  r: 2.5, dip: 0 },        // flower patch 4
+]
+
+// ── Path corridor: flatten terrain along the stone path ──
+// Bezier control points: [14,0] → [8,1.5] → [0,4] → [-6,5]
+const PATH_POINTS: [number, number][] = []
+for (let t = 0; t <= 1; t += 0.05) {
+  const t2 = t * t, t3 = t2 * t
+  const mt = 1 - t, mt2 = mt * mt, mt3 = mt2 * mt
+  PATH_POINTS.push([
+    mt3 * 14 + 3 * mt2 * t * 8 + 3 * mt * t2 * 0 + t3 * -6,
+    mt3 * 0 + 3 * mt2 * t * 1.5 + 3 * mt * t2 * 4 + t3 * 5,
+  ])
+}
+
 // ── Undulating ground geometry ────────────────────────────
 function createUndulatingPlane(width: number, depth: number, segX: number, segZ: number): THREE.PlaneGeometry {
   const geo = new THREE.PlaneGeometry(width, depth, segX, segZ)
@@ -198,21 +226,41 @@ function createUndulatingPlane(width: number, depth: number, segX: number, segZ:
   const noise2 = makeNoise(333)
 
   for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i)
-    const y = pos.getY(i) // in plane space, this is the "depth" direction
-    // Map to 0..1 space
-    const u = (x / width + 0.5)
-    const v = (y / depth + 0.5)
+    const px = pos.getX(i)   // = world X
+    const py = pos.getY(i)   // = -world Z (plane Y → world -Z after rotation)
+    // Map to 0..1 space for noise
+    const u = (px / width + 0.5)
+    const v = (py / depth + 0.5)
     // Gentle rolling hills
     const hill = noise(u * 6, v * 6) * 0.18 + noise2(u * 14, v * 14) * 0.06
     // Flatten center more (where cow walks)
     const distFromCenter = Math.sqrt((u - 0.5) ** 2 + (v - 0.5) ** 2) * 2
-    const flattenFactor = Math.max(0, 1 - (1 - distFromCenter) * 0.6)
-    pos.setZ(i, hill * flattenFactor)
+    let flattenFactor = Math.max(0, 1 - (1 - distFromCenter) * 0.6)
+
+    // Suppress hills near ponds, barn, trough — and optionally dip
+    let dip = 0
+    for (const zone of FLAT_ZONES) {
+      // plane (px, py) → world (px, _, -py)
+      const dx = px - zone.wx
+      const dz = (-py) - zone.wz
+      const dist = Math.sqrt(dx * dx + dz * dz)
+      if (dist < zone.r) {
+        const blend = 1 - smoothstep(zone.r * 0.5, zone.r, dist)
+        flattenFactor *= (1 - blend)
+        dip += zone.dip * blend
+      }
+    }
+
+    pos.setZ(i, hill * flattenFactor + dip)
   }
 
   geo.computeVertexNormals()
   return geo
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)))
+  return t * t * (3 - 2 * t)
 }
 
 export default function Ground() {

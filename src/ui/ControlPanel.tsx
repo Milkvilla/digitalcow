@@ -124,6 +124,11 @@ export function ControlPanel() {
   const currentAge = useGameStore((s) => s.cow.age)
   const currentSeason = useGameStore((s) => s.world.season)
   const profilerEnabled = useStore(profilerStore, (s) => s.enabled)
+  const gates = useGameStore((s) => s.world.gates)
+  const trust = useGameStore((s) => s.cow.personality.trust)
+
+  const gateOpen = gates.length > 0 && gates[0].isOpen
+  const relationshipTier = trust <= 30 ? 'Wary' : trust <= 65 ? 'Familiar' : 'Bonded'
 
   return (
     <div style={containerStyle}>
@@ -183,6 +188,9 @@ export function ControlPanel() {
         <button style={toggleStyle(profilerEnabled)} onClick={() => profilerStore.getState().toggleProfiler()} onMouseEnter={hover} onMouseLeave={unhover}>
           {profilerEnabled ? 'Profiler ON' : 'Profiler OFF'}
         </button>
+        <button style={toggleStyle(gateOpen)} onClick={() => gameStore.getState().playerAction({ type: 'toggle_gate', gateId: 'gate_right' })} onMouseEnter={hover} onMouseLeave={unhover}>
+          {gateOpen ? 'Gate OPEN' : 'Gate CLOSED'}
+        </button>
       </div>
 
       {/* Row 3: Breed dropdown + age slider + season */}
@@ -215,6 +223,23 @@ export function ControlPanel() {
             <option key={i} value={i} style={optionStyle}>{label}</option>
           ))}
         </select>
+        <span style={{
+          padding: '6px 10px',
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: 'system-ui, sans-serif',
+          borderRadius: 6,
+          color: '#fff',
+          background: relationshipTier === 'Bonded'
+            ? 'linear-gradient(135deg, #66bb6a, #388e3c)'
+            : relationshipTier === 'Familiar'
+              ? 'linear-gradient(135deg, #ffa726, #ef6c00)'
+              : 'linear-gradient(135deg, #777, #555)',
+          textShadow: '0 1px 3px rgba(0,0,0,0.4)',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
+        }}>
+          {relationshipTier} ({trust})
+        </span>
       </div>
     </div>
   )

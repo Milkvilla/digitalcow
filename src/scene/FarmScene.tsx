@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Stats } from '@react-three/drei'
 import { useStore } from 'zustand'
 import * as THREE from 'three'
-import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
+import { EffectComposer, Bloom, Vignette, BrightnessContrast, HueSaturation, N8AO } from '@react-three/postprocessing'
 import type { EngineEvent } from '../engine/types.ts'
 import {
   CAMERA_POSITION,
@@ -511,7 +511,7 @@ function Scene() {
       {profilerEnabled && <RendererStats />}
       {t.sky && <SkyScene sunPosition={sunPosition} timeOfDay={timeOfDay} visible />}
       {t.clouds && <Clouds timeOfDay={timeOfDay} />}
-      {t.horizon && <Horizon timeOfDay={timeOfDay} />}
+      {t.horizon && <Horizon timeOfDay={timeOfDay} sunPosition={sunPosition} />}
       {t.ground && <Ground />}
       {t.grass && <Grass />}
       {t.decorations && <Decorations />}
@@ -553,16 +553,25 @@ function Scene() {
       {/* Post-processing */}
       {t.postProcessing && (
         <EffectComposer multisampling={0}>
-          <Bloom
-            luminanceThreshold={0.8}
-            luminanceSmoothing={0.9}
-            intensity={0.3}
-            mipmapBlur
-            levels={3}
-            width={256}
-            height={256}
+          <N8AO
+            aoRadius={2.5}
+            intensity={1.2}
+            distanceFalloff={0.8}
+            color="#2a1a08"
+            halfRes
           />
-          <Vignette eskil={false} offset={0.15} darkness={0.35} />
+          <Bloom
+            luminanceThreshold={0.7}
+            luminanceSmoothing={0.8}
+            intensity={0.4}
+            mipmapBlur
+            levels={4}
+            width={384}
+            height={384}
+          />
+          <BrightnessContrast brightness={0.02} contrast={0.08} />
+          <HueSaturation saturation={0.08} />
+          <Vignette eskil={false} offset={0.12} darkness={0.4} />
         </EffectComposer>
       )}
     </>
@@ -604,10 +613,10 @@ export function FarmScene() {
         near: 0.1,
         far: 500,
       }}
-      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
+      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}
       style={{ width: '100%', height: '100%' }}
     >
-      <fog attach="fog" args={[initialFogColor, 30, 90]} />
+      <fog attach="fog" args={[initialFogColor, 25, 85]} />
 
       <OrbitControlsWrapper />
 

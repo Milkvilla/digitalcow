@@ -7,7 +7,7 @@ import { getTimePalette } from '../engine/palette.ts'
 
 interface CloudDef {
   position: THREE.Vector3
-  puffs: { offset: THREE.Vector3; scale: number }[]
+  puffs: { offset: THREE.Vector3; scale: number; brightness: number }[]
   speed: number
   phase: number
 }
@@ -19,55 +19,49 @@ function generateClouds(count: number): CloudDef[] {
     const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5
     const radius = 22 + Math.random() * 40
 
-    // Height variation — clouds well above camera (camera is at y=12)
     const altitudeRoll = Math.random()
     let y: number
     if (altitudeRoll < 0.3) {
-      // Lower clouds (still well above camera)
       y = 35 + Math.random() * 10
     } else if (altitudeRoll < 0.75) {
-      // Mid-altitude
       y = 45 + Math.random() * 15
     } else {
-      // High clouds
       y = 60 + Math.random() * 15
     }
 
-    // Size variation — some big cumulus, some small wisps
     const sizeRoll = Math.random()
     let sizeMultiplier: number
     let puffCount: number
     if (sizeRoll < 0.2) {
-      // Large cumulus
       sizeMultiplier = 1.8 + Math.random() * 0.8
-      puffCount = 8 + Math.floor(Math.random() * 5) // 8-12 puffs
+      puffCount = 10 + Math.floor(Math.random() * 6) // more puffs for large
     } else if (sizeRoll < 0.5) {
-      // Medium clouds
       sizeMultiplier = 1.0 + Math.random() * 0.5
-      puffCount = 5 + Math.floor(Math.random() * 4) // 5-8 puffs
+      puffCount = 7 + Math.floor(Math.random() * 4)
     } else {
-      // Small wisps
       sizeMultiplier = 0.5 + Math.random() * 0.4
-      puffCount = 3 + Math.floor(Math.random() * 3) // 3-5 puffs
+      puffCount = 4 + Math.floor(Math.random() * 3)
     }
 
-    const puffs: { offset: THREE.Vector3; scale: number }[] = []
+    const puffs: { offset: THREE.Vector3; scale: number; brightness: number }[] = []
 
-    // Determine flat bottom baseline (cloud base)
-    const cloudBase = -0.3 * sizeMultiplier // bottom edge
+    const cloudBase = -0.3 * sizeMultiplier
 
     for (let j = 0; j < puffCount; j++) {
-      // Puffs positioned with flat bottom — y offset clamped so bottoms align
       const rawY = Math.random() * 2.0 * sizeMultiplier
-      const puffY = Math.max(rawY, cloudBase + 0.2) // keep above the base
+      const puffY = Math.max(rawY, cloudBase + 0.2)
+      const yPos = puffY - sizeMultiplier * 0.5
+      // Bottom puffs are darker (self-shadowing), top puffs brighter
+      const brightness = yPos < -0.2 * sizeMultiplier ? 0.65 : yPos > 0.3 * sizeMultiplier ? 1.1 : 1.0
 
       puffs.push({
         offset: new THREE.Vector3(
           (Math.random() - 0.5) * 5 * sizeMultiplier,
-          puffY - sizeMultiplier * 0.5, // shift down so base is near cloudBase
+          yPos,
           (Math.random() - 0.5) * 3 * sizeMultiplier,
         ),
         scale: (1.2 + Math.random() * 2.0) * sizeMultiplier,
+        brightness,
       })
     }
 
@@ -112,8 +106,8 @@ function Cloud({
   const [cr, cg, cb] = palette.cloudTint
 
   // Cloud opacity: dimmer at night
-  const nightFade = palette.starOpacity // 0 during day, 0.9 at night
-  const opacity = 0.55 * (1 - nightFade * 0.7) + 0.05
+  const nightFade = palette.starOpacity
+  const opacity = 0.55 * (1 - nightFade * 0.7) + 0.08
 
   return (
     <group ref={groupRef} position={def.position}>
@@ -121,16 +115,17 @@ function Cloud({
         // Sun-facing edges get slightly warmer tint
         const puffWorldDir = puff.offset.clone().normalize()
         const sunDot = Math.max(puffWorldDir.dot(sunDirection), 0)
-        const warmth = sunDot * 0.15
+        const warmth = sunDot * 0.12
+        const b = puff.brightness
 
         return (
           <mesh key={i} position={puff.offset} scale={puff.scale}>
-            <sphereGeometry args={[1, 7, 5]} />
+            <sphereGeometry args={[1, 10, 8]} />
             <meshBasicMaterial
               color={new THREE.Color(
-                cr + warmth,
-                cg + warmth * 0.6,
-                cb - warmth * 0.3,
+                (cr * b + warmth) ,
+                (cg * b + warmth * 0.5),
+                (cb * b - warmth * 0.2),
               )}
               transparent
               opacity={opacity}
@@ -146,20 +141,16 @@ function Cloud({
 // ── Clouds collection ───────────────────────────────────
 
 export default function Clouds({ timeOfDay }: { timeOfDay: number }) {
-  const clouds = useMemo(() => generateClouds(18), [])
+  const clouds = useMemo(() => generateClouds(22), [])
 
-  // Compute sun direction from time for cloud warming
   const sunDirection = useMemo(() => {
     return new THREE.Vector3(0, 1, 0)
   }, [])
 
-  // Update sun direction each frame based on time
   useFrame(() => {
     const palette = getTimePalette(timeOfDay)
-    // Approximate sun direction from zenith brightness
-    // During day the sun is roughly overhead, dawn/dusk near horizon
-    const elevation = palette.sunIntensity / 1.5 // rough 0-1
-    sunDirection.set(0, elevation, 0).normalize()
+    const elevation = palette.sunIntensity / 1.5
+    sunDirection.set(0.3, Math.max(elevation, 0.1), 0.2).normalize()
   })
 
   return (

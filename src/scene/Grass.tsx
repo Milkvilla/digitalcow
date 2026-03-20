@@ -22,6 +22,7 @@ const vertexShader = /* glsl */ `
 
   varying float vHeight;
   varying float vOffset;
+  varying vec3 vWorldPos;
 
   void main() {
     // Position in local blade space: y goes from 0 (base) to bladeHeight (tip)
@@ -29,14 +30,19 @@ const vertexShader = /* glsl */ `
     vOffset = aOffset;
 
     vec4 worldPos = instanceMatrix * vec4(position, 1.0);
+    vWorldPos = worldPos.xyz;
 
-    // Wind sway: only affects the tip (vHeight factor)
-    float tipFactor = vHeight * vHeight; // quadratic falloff from base
-    float sway = sin(uTime * 1.5 + worldPos.x * 0.5 + worldPos.z * 0.3 + aOffset)
-               * tipFactor * uWindStrength * 0.15;
+    // Wind sway: quadratic falloff from base, multi-frequency
+    float tipFactor = vHeight * vHeight;
+    float sway1 = sin(uTime * 1.5 + worldPos.x * 0.5 + worldPos.z * 0.3 + aOffset)
+               * tipFactor * uWindStrength * 0.18;
+    float sway2 = sin(uTime * 2.8 + worldPos.x * 1.2 + worldPos.z * 0.8 + aOffset * 2.0)
+               * tipFactor * uWindStrength * 0.06;
 
-    worldPos.x += sway * uWindDirection.x;
-    worldPos.z += sway * uWindDirection.y;
+    worldPos.x += (sway1 + sway2) * uWindDirection.x;
+    worldPos.z += (sway1 + sway2) * uWindDirection.y;
+    // Slight vertical compression when swaying
+    worldPos.y -= abs(sway1) * 0.15;
 
     gl_Position = projectionMatrix * viewMatrix * worldPos;
   }
@@ -45,17 +51,40 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   varying float vHeight;
   varying float vOffset;
+  varying vec3 vWorldPos;
 
   void main() {
-    // Green gradient: darker at base, subtler tip
-    vec3 baseColor = vec3(0.10, 0.22, 0.04);
-    vec3 tipColor  = vec3(0.18, 0.38, 0.08);
-    vec3 color = mix(baseColor, tipColor, vHeight);
+    // Rich green gradient: dark earthy base → bright sunlit tips
+    vec3 baseColor = vec3(0.06, 0.14, 0.02);   // dark forest floor
+    vec3 midColor  = vec3(0.12, 0.28, 0.05);   // mid green
+    vec3 tipColor  = vec3(0.28, 0.52, 0.12);   // bright sunlit tip
 
-    // Per-blade color variation using offset (subtle)
-    float variation = sin(vOffset * 6.28) * 0.04;
+    // Two-stage gradient: base→mid (lower 40%), mid→tip (upper 60%)
+    vec3 color;
+    if (vHeight < 0.4) {
+      color = mix(baseColor, midColor, vHeight / 0.4);
+    } else {
+      color = mix(midColor, tipColor, (vHeight - 0.4) / 0.6);
+    }
+
+    // Per-blade color variation (hue shift and brightness)
+    float variation = sin(vOffset * 6.28) * 0.06;
+    float variation2 = cos(vOffset * 3.14 + 1.0) * 0.04;
     color.g += variation;
-    color.r += variation * 0.2;
+    color.r += variation * 0.3 + variation2 * 0.2;
+    color.b += variation2 * 0.15;
+
+    // Yellowish-green tip highlights (sun-bleached look)
+    float tipHighlight = smoothstep(0.7, 1.0, vHeight);
+    color += vec3(0.08, 0.06, 0.0) * tipHighlight * (0.5 + sin(vOffset * 12.56) * 0.5);
+
+    // Ambient occlusion at base (ground shadow)
+    float ao = smoothstep(0.0, 0.25, vHeight);
+    color *= 0.45 + ao * 0.55;
+
+    // Subtle distance-based color variation (patches of different grass species)
+    float patchNoise = sin(vWorldPos.x * 0.4 + vWorldPos.z * 0.3) * 0.5 + 0.5;
+    color = mix(color, color * vec3(1.05, 0.95, 0.9), patchNoise * 0.15);
 
     gl_FragColor = vec4(color, 1.0);
   }
@@ -73,12 +102,17 @@ function isInExclusionZone(x: number, z: number): boolean {
 }
 
 function makeBladeGeometry(height: number): THREE.BufferGeometry {
-  const w = 0.015
-  // Simple triangle: base-left, base-right, tip
+  // Wider quad blade with taper — 4 vertices (2 triangles)
+  const w = 0.022
   const positions = new Float32Array([
+    // Triangle 1: base-left, base-right, mid-right
     -w / 2, 0, 0,
      w / 2, 0, 0,
-     0, height, 0,
+     w / 3, height * 0.55, 0,
+    // Triangle 2: base-left, mid-right, tip
+    -w / 2, 0, 0,
+     w / 3, height * 0.55, 0,
+     0, height, 0.003,  // slight z-offset for natural curve
   ])
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))

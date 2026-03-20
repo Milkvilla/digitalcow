@@ -4,6 +4,7 @@ import { TimeControl } from './TimeControl'
 import { ControlPanel } from './ControlPanel'
 import { DebugOverlay } from './DebugOverlay'
 import { ProfilerPanel } from './ProfilerPanel'
+import { TaskPanel } from './TaskPanel'
 
 const appStyle: React.CSSProperties = {
   width: '100vw',
@@ -29,6 +30,7 @@ export function App() {
         <StatusBars />
         <TimeControl />
         <ControlPanel />
+        <TaskPanel />
         <DebugOverlay />
         <ProfilerPanel />
       </div>

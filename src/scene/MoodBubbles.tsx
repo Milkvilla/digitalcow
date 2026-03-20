@@ -5,7 +5,7 @@ import { gameStore } from '../ui/hooks.ts'
 
 // ── Types ────────────────────────────────────────────────
 
-type Mood = 'sleeping' | 'eating' | 'hungry' | 'lowEnergy' | 'happy' | 'none'
+type Mood = 'sleeping' | 'eating' | 'hungry' | 'thirsty' | 'cold' | 'lowEnergy' | 'stressed' | 'happy' | 'none'
 
 // ── Pre-allocated objects ────────────────────────────────
 
@@ -18,11 +18,16 @@ function resolveMood(
   hunger: number,
   energy: number,
   happiness: number,
+  thirst: number,
+  conditions: string[],
 ): Mood {
   if (behavior === 'sleeping') return 'sleeping'
   if (behavior === 'eating' || behavior === 'drinking') return 'eating'
+  if (conditions.includes('cold')) return 'cold'
   if (hunger > 60) return 'hungry'
+  if (thirst > 60) return 'thirsty'
   if (energy < 35) return 'lowEnergy'
+  if (happiness < 20) return 'stressed'
   if (happiness > 60) return 'happy'
   return 'none'
 }
@@ -144,6 +149,110 @@ function HungryIcon() {
   )
 }
 
+// ── Water droplet icon (thirsty) ─────────────────────────
+
+function ThirstyIcon() {
+  const groupRef = useRef<THREE.Group>(null!)
+
+  useFrame((s) => {
+    if (!groupRef.current) return
+    const t = s.clock.elapsedTime
+    // Bob up and down
+    groupRef.current.position.y = Math.sin(t * 2.5) * 0.06
+  })
+
+  return (
+    <group ref={groupRef} position={[0, 0, 0.01]}>
+      {/* Droplet top (pointed cone) */}
+      <mesh position={[0, 0.1, 0]} rotation={[0, 0, Math.PI]}>
+        <coneGeometry args={[0.12, 0.2, 8]} />
+        <meshBasicMaterial color="#1e88e5" />
+      </mesh>
+      {/* Droplet bottom (sphere) */}
+      <mesh position={[0, -0.04, 0]}>
+        <sphereGeometry args={[0.12, 10, 8]} />
+        <meshBasicMaterial color="#1e88e5" />
+      </mesh>
+    </group>
+  )
+}
+
+// ── Snowflake icon (cold) ────────────────────────────────
+
+function ColdIcon() {
+  const groupRef = useRef<THREE.Group>(null!)
+
+  useFrame((s) => {
+    if (!groupRef.current) return
+    // Rotate slowly
+    groupRef.current.rotation.z = s.clock.elapsedTime * 0.5
+  })
+
+  return (
+    <group ref={groupRef} position={[0, 0, 0.01]}>
+      {/* Six arms of the snowflake */}
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <mesh key={i} rotation={[0, 0, (i * Math.PI) / 3]}>
+          <boxGeometry args={[0.04, 0.32, 0.02]} />
+          <meshBasicMaterial color="#81d4fa" />
+        </mesh>
+      ))}
+      {/* Small diamond accents on each arm */}
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <mesh
+          key={`accent-${i}`}
+          position={[
+            Math.sin((i * Math.PI) / 3) * 0.12,
+            Math.cos((i * Math.PI) / 3) * 0.12,
+            0.01,
+          ]}
+          rotation={[0, 0, (i * Math.PI) / 3 + Math.PI / 4]}
+        >
+          <boxGeometry args={[0.05, 0.05, 0.02]} />
+          <meshBasicMaterial color="#81d4fa" />
+        </mesh>
+      ))}
+      {/* Center circle */}
+      <mesh position={[0, 0, 0.01]}>
+        <circleGeometry args={[0.04, 6]} />
+        <meshBasicMaterial color="#81d4fa" side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  )
+}
+
+// ── Swirl icon (stressed) ────────────────────────────────
+
+function StressedIcon() {
+  const groupRef = useRef<THREE.Group>(null!)
+
+  useFrame((s) => {
+    if (!groupRef.current) return
+    // Pulse effect
+    const pulse = 1 + Math.sin(s.clock.elapsedTime * 3.5) * 0.12
+    groupRef.current.scale.setScalar(pulse)
+  })
+
+  return (
+    <group ref={groupRef} position={[0, 0, 0.01]}>
+      {/* Spiral built from small spheres arranged in a spiral path */}
+      {Array.from({ length: 16 }, (_, i) => {
+        const angle = (i / 16) * Math.PI * 3 // 1.5 full turns
+        const radius = 0.04 + i * 0.01
+        const x = Math.cos(angle) * radius
+        const y = Math.sin(angle) * radius
+        const size = 0.02 + i * 0.003
+        return (
+          <mesh key={i} position={[x, y, 0]}>
+            <sphereGeometry args={[size, 6, 6]} />
+            <meshBasicMaterial color="#ff5722" />
+          </mesh>
+        )
+      })}
+    </group>
+  )
+}
+
 // ── Battery icon (low energy) ────────────────────────────
 
 function LowEnergyIcon() {
@@ -230,6 +339,8 @@ export default function MoodBubbles() {
       cowState.needs.hunger,
       cowState.needs.energy,
       cowState.needs.happiness,
+      cowState.needs.thirst,
+      cowState.conditions,
     )
 
     // Only trigger re-render when mood actually changes
@@ -260,8 +371,11 @@ export default function MoodBubbles() {
       <BubbleBackdrop />
       {mood === 'sleeping' && <ZzzIcon />}
       {mood === 'eating' && <EatingIcon />}
+      {mood === 'cold' && <ColdIcon />}
       {mood === 'hungry' && <HungryIcon />}
+      {mood === 'thirsty' && <ThirstyIcon />}
       {mood === 'lowEnergy' && <LowEnergyIcon />}
+      {mood === 'stressed' && <StressedIcon />}
       {mood === 'happy' && <HappyIcon />}
     </group>
   )

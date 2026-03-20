@@ -52,6 +52,14 @@ function formatActivityType(activity: { type: string }): string {
   return JSON.stringify(activity)
 }
 
+function relationshipTierFromTrust(trust: number): string {
+  if (trust <= 30) return 'Wary'
+  if (trust <= 65) return 'Familiar'
+  return 'Bonded'
+}
+
+const SEASON_NAMES = ['Spring', 'Summer', 'Autumn', 'Winter']
+
 function formatEvent(event: EngineEvent): string {
   switch (event.type) {
     case 'behavior_changed':
@@ -70,6 +78,18 @@ function formatEvent(event: EngineEvent): string {
       return 'arrived at target'
     case 'need_critical':
       return `CRITICAL: ${event.need} = ${event.value.toFixed(1)}`
+    case 'relationship_changed':
+      return `relationship: ${event.tier}`
+    case 'health_warning':
+      return `health warning: ${event.condition}`
+    case 'achievement_unlocked':
+      return `ACHIEVEMENT: ${event.id}`
+    case 'gate_toggled':
+      return `gate ${event.gateId}: ${event.isOpen ? 'open' : 'closed'}`
+    case 'day_passed':
+      return `day ${event.dayCount}`
+    case 'milk_produced':
+      return `milk produced: ${event.amount}`
     default:
       return JSON.stringify(event)
   }
@@ -139,7 +159,7 @@ export function DebugOverlay() {
   // Compute behavior scores
   let scores: Record<string, number> = {}
   try {
-    scores = scoreActivities(cow, world)
+    scores = scoreActivities(cow, world, false, 0)
   } catch {
     // behaviors module may not be available yet
   }
@@ -191,12 +211,38 @@ export function DebugOverlay() {
           <span>{cow.needs.happiness.toFixed(1)}</span>
         </div>
         <div style={rowStyle}>
+          <span>Thirst</span>
+          <span>{cow.needs.thirst.toFixed(1)}</span>
+        </div>
+        <div style={rowStyle}>
+          <span>Health</span>
+          <span>{cow.health.toFixed(1)}</span>
+        </div>
+        <div style={rowStyle}>
+          <span>Milk Storage</span>
+          <span>{cow.milkStorage.toFixed(1)}</span>
+        </div>
+        <div style={rowStyle}>
           <span>Trust</span>
           <span>{cow.personality.trust.toFixed(1)}</span>
         </div>
         <div style={rowStyle}>
           <span>Curiosity</span>
           <span>{cow.personality.curiosity.toFixed(1)}</span>
+        </div>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={headingStyle}>CONDITION</div>
+        <div style={rowStyle}>
+          <span>Conditions</span>
+          <span style={{ maxWidth: 200, textAlign: 'right', wordBreak: 'break-all' }}>
+            {cow.conditions.join(', ') || 'none'}
+          </span>
+        </div>
+        <div style={rowStyle}>
+          <span>Relationship</span>
+          <span>{relationshipTierFromTrust(cow.personality.trust)}</span>
         </div>
       </div>
 
@@ -219,9 +265,23 @@ export function DebugOverlay() {
           <span>{world.isPaused ? 'YES' : 'NO'}</span>
         </div>
         <div style={rowStyle}>
+          <span>Day</span>
+          <span>{world.dayCount}</span>
+        </div>
+        <div style={rowStyle}>
+          <span>Season</span>
+          <span>{SEASON_NAMES[world.season] ?? world.season} ({world.season})</span>
+        </div>
+        <div style={rowStyle}>
           <span>Foods</span>
           <span>{world.foods.length}</span>
         </div>
+        {world.gates.map((gate) => (
+          <div key={gate.id} style={rowStyle}>
+            <span>Gate {gate.id}</span>
+            <span>{gate.isOpen ? 'OPEN' : 'CLOSED'}</span>
+          </div>
+        ))}
       </div>
 
       {Object.keys(scores).length > 0 && (

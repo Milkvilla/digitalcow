@@ -47,24 +47,20 @@ const skyFragmentShader = /* glsl */ `
     }
 
     // ── Base sky gradient with pow curves for atmospheric falloff ──
-    // Use a smooth power curve for the entire range instead of hard boundary
-    float t = pow(h, 0.55); // atmospheric density falloff — more color near horizon
+    float t = pow(h, 0.55);
     vec3 color = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.35, t));
     color = mix(color, uTopColor, smoothstep(0.15, 0.85, t));
 
     // ── Subtle warm band just above the horizon ─────────────
-    // A thin warm-colored band for color depth
-    float warmBand = exp(-pow((h - 0.06) * 18.0, 2.0)); // gaussian centered at h=0.06
+    float warmBand = exp(-pow((h - 0.06) * 18.0, 2.0));
     color = mix(color, uWarmBandColor, warmBand * 0.25 * uHazeStrength);
 
     // ── Horizon haze band ─────────────────
-    // Warm atmospheric scattering near horizon, stronger at dawn/dusk
     float hazeFalloff = exp(-h * 10.0);
     vec3 hazeColor = mix(uHorizonColor, uSunColor, 0.35);
     color = mix(color, hazeColor, hazeFalloff * uHazeStrength * 0.55);
 
     // ── Sun glow in sky ───────────────────
-    // Soft atmospheric glow around the sun direction (no disc — SunSprite handles it)
     float sunDot = max(dot(dir, normalize(uSunDir)), 0.0);
 
     // Wide atmospheric scatter (Mie-like)
@@ -99,7 +95,7 @@ const starVertexShader = /* glsl */ `
     // Stars near horizon are dimmer
     float horizonDim = smoothstep(0.0, 0.25, elevation);
 
-    // Twinkling: each star has its own frequency and phase
+    // Twinkling
     float twinkle = sin(uTime * (1.5 + aSeed * 2.0) + aSeed * 43.0) * 0.3 + 0.7;
     twinkle *= sin(uTime * (0.7 + aSeed * 1.3) + aSeed * 17.0) * 0.2 + 0.8;
 
@@ -108,7 +104,6 @@ const starVertexShader = /* glsl */ `
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 
-    // Bright stars get bigger point size
     gl_PointSize = (1.0 + aBrightness * 2.5) * (0.7 + twinkle * 0.3);
   }
 `
@@ -118,7 +113,6 @@ const starFragmentShader = /* glsl */ `
   varying vec3 vColor;
 
   void main() {
-    // Soft circular point
     float d = length(gl_PointCoord - 0.5) * 2.0;
     float soft = 1.0 - smoothstep(0.0, 1.0, d);
     gl_FragColor = vec4(vColor, vAlpha * soft);
@@ -129,18 +123,17 @@ function Stars({ opacity }: { opacity: number }) {
   const materialRef = useRef<THREE.ShaderMaterial>(null!)
 
   const { positions, seeds, brightnesses, colors } = useMemo(() => {
-    const count = 700
+    const count = 1200
     const pos = new Float32Array(count * 3)
     const sd = new Float32Array(count)
     const br = new Float32Array(count)
     const col = new Float32Array(count * 3)
 
-    // Define a Milky Way band direction (a stripe across the sky)
     const milkyWayAxis = new THREE.Vector3(0.6, 0.3, 0.8).normalize()
 
     for (let i = 0; i < count; i++) {
       const theta = Math.random() * Math.PI * 2
-      const phi = Math.random() * Math.PI * 0.48 // upper hemisphere
+      const phi = Math.random() * Math.PI * 0.48
       const r = 150
       const x = r * Math.sin(phi) * Math.cos(theta)
       const y = r * Math.cos(phi) + 5
@@ -151,35 +144,28 @@ function Stars({ opacity }: { opacity: number }) {
 
       sd[i] = Math.random()
 
-      // Check proximity to Milky Way band for brightness boost
       const starDir = new THREE.Vector3(x, y, z).normalize()
       const milkyDist = Math.abs(starDir.dot(milkyWayAxis))
-      const inMilkyWay = milkyDist < 0.15 // close to the band
+      const inMilkyWay = milkyDist < 0.15
       const milkyBoost = inMilkyWay ? 0.3 + Math.random() * 0.2 : 0
 
-      // First 10 stars are designated "bright" stars
       if (i < 10) {
         br[i] = 0.85 + Math.random() * 0.15
       } else if (Math.random() < 0.15) {
-        // Some regular bright stars
         br[i] = 0.6 + Math.random() * 0.3 + milkyBoost
       } else {
         br[i] = 0.15 + Math.random() * 0.35 + milkyBoost
       }
 
-      // Star color variation — most white, some warm, some blue
       if (i < 4) {
-        // Warm tinted stars (amber/orange)
         col[i * 3] = 1.0
         col[i * 3 + 1] = 0.85 + Math.random() * 0.1
         col[i * 3 + 2] = 0.7 + Math.random() * 0.1
       } else if (i < 8) {
-        // Blue tinted stars
         col[i * 3] = 0.8 + Math.random() * 0.1
         col[i * 3 + 1] = 0.85 + Math.random() * 0.1
         col[i * 3 + 2] = 1.0
       } else {
-        // White/near-white (slight random variation)
         const warmth = (Math.random() - 0.5) * 0.08
         col[i * 3] = 1.0 + warmth
         col[i * 3 + 1] = 1.0
@@ -208,26 +194,10 @@ function Stars({ opacity }: { opacity: number }) {
   return (
     <points>
       <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          args={[positions, 3]}
-          count={count}
-        />
-        <bufferAttribute
-          attach="attributes-aSeed"
-          args={[seeds, 1]}
-          count={count}
-        />
-        <bufferAttribute
-          attach="attributes-aBrightness"
-          args={[brightnesses, 1]}
-          count={count}
-        />
-        <bufferAttribute
-          attach="attributes-aColor"
-          args={[colors, 3]}
-          count={count}
-        />
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} count={count} />
+        <bufferAttribute attach="attributes-aSeed" args={[seeds, 1]} count={count} />
+        <bufferAttribute attach="attributes-aBrightness" args={[brightnesses, 1]} count={count} />
+        <bufferAttribute attach="attributes-aColor" args={[colors, 3]} count={count} />
       </bufferGeometry>
       <shaderMaterial
         ref={materialRef}
@@ -240,8 +210,6 @@ function Stars({ opacity }: { opacity: number }) {
     </points>
   )
 }
-
-// Milky Way visual handled by star density clustering (no plane needed)
 
 // ── Moon position (arcs across the night sky) ────────────
 
@@ -264,7 +232,63 @@ function getMoonPosition(timeOfDay: number): Vec3 {
   ]
 }
 
-// ── Sun billboard sprite with god-rays ───────────────────
+// ── Sun shader — radial gradient with corona, limb darkening, rays ──
+
+const sunVertexShader = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+const sunFragmentShader = /* glsl */ `
+  uniform float uTime;
+  uniform vec3 uSunColor;
+  uniform float uHaze;
+
+  varying vec2 vUv;
+
+  void main() {
+    vec2 center = vUv - 0.5;
+    float dist = length(center) * 2.0;
+
+    // Core disc with limb darkening
+    float disc = 1.0 - smoothstep(0.0, 0.32, dist);
+    float limbDark = 1.0 - pow(dist / 0.32, 2.0) * 0.3;
+    vec3 coreColor = vec3(1.0, 0.98, 0.92) * disc * limbDark;
+
+    // Inner corona — bright warm glow around disc
+    float corona1 = exp(-dist * 6.0) * 0.8;
+
+    // Outer soft corona
+    float corona2 = exp(-dist * 2.5) * 0.25;
+
+    // Spiky ray pattern (procedural) — 8 major rays + 4 minor
+    float angle = atan(center.y, center.x);
+    float rays8 = pow(abs(cos(angle * 4.0)), 12.0);
+    float rays4 = pow(abs(sin(angle * 2.0 + 0.5)), 16.0);
+    float rayMask = (rays8 * 0.6 + rays4 * 0.3) * exp(-dist * 3.0);
+
+    // Animated shimmer on rays
+    float shimmer = sin(uTime * 2.0 + angle * 3.0) * 0.1 + 0.9;
+    rayMask *= shimmer;
+
+    // Combine
+    vec3 warmWhite = vec3(1.0, 0.97, 0.88);
+    vec3 warmGold = mix(uSunColor, vec3(1.0, 0.85, 0.5), uHaze * 0.6);
+
+    vec3 color = coreColor * warmWhite;
+    color += corona1 * warmGold;
+    color += corona2 * mix(warmGold, vec3(1.0, 0.6, 0.3), uHaze);
+    color += rayMask * warmGold * 0.5;
+
+    float alpha = disc + corona1 + corona2 * 0.6 + rayMask * 0.3;
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`
 
 function SunSprite({
   position,
@@ -276,124 +300,126 @@ function SunSprite({
   timeOfDay: number
 }) {
   const groupRef = useRef<THREE.Group>(null!)
+  const materialRef = useRef<THREE.ShaderMaterial>(null!)
 
-  // Billboard — always face the camera
-  useFrame(({ camera }) => {
-    if (!groupRef.current) return
-    groupRef.current.quaternion.copy(camera.quaternion)
-  })
-
-  // Golden hour detection — god rays are visible near sunrise/sunset
-  const isGoldenHour =
-    (timeOfDay > SUNRISE_HOUR - 0.5 && timeOfDay < SUNRISE_HOUR + 1.5) ||
-    (timeOfDay > SUNSET_HOUR - 1.5 && timeOfDay < SUNSET_HOUR + 0.5)
-
-  // Halo warmth: warmer at dawn/dusk, whiter at noon
-  const warmFactor = palette.hazeStrength // higher at dawn/dusk
-  const haloColor = new THREE.Color(
-    1.0,
-    0.95 - warmFactor * 0.2,
-    0.85 - warmFactor * 0.35,
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uSunColor: { value: new THREE.Color(...palette.sunColor) },
+      uHaze: { value: palette.hazeStrength },
+    }),
+    [],
   )
 
-  const sunCol = new THREE.Color(...palette.sunColor)
+  useFrame(({ camera, clock }) => {
+    if (!groupRef.current) return
+    groupRef.current.quaternion.copy(camera.quaternion)
+
+    if (materialRef.current) {
+      materialRef.current.uniforms.uTime.value = clock.elapsedTime
+      materialRef.current.uniforms.uSunColor.value.setRGB(...palette.sunColor)
+      materialRef.current.uniforms.uHaze.value = palette.hazeStrength
+    }
+  })
 
   return (
     <group position={position}>
       <group ref={groupRef}>
-        {/* Wide soft outer halo — warmer at dawn/dusk */}
+        {/* Sun rendered via shader on a quad */}
         <mesh>
-          <planeGeometry args={[50, 50]} />
-          <meshBasicMaterial
-            color={haloColor}
+          <planeGeometry args={[40, 40]} />
+          <shaderMaterial
+            ref={materialRef}
+            vertexShader={sunVertexShader}
+            fragmentShader={sunFragmentShader}
+            uniforms={uniforms}
             transparent
-            opacity={0.04}
-            toneMapped={false}
             depthWrite={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {/* Medium glow */}
-        <mesh>
-          <planeGeometry args={[32, 32]} />
-          <meshBasicMaterial
-            color={sunCol}
-            transparent
-            opacity={0.08}
-            toneMapped={false}
-            depthWrite={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {/* Inner glow */}
-        <mesh>
-          <planeGeometry args={[18, 18]} />
-          <meshBasicMaterial
-            color="#fff8e0"
-            transparent
-            opacity={0.18}
-            toneMapped={false}
-            depthWrite={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {/* Sun core */}
-        <mesh>
-          <circleGeometry args={[1.5, 24]} />
-          <meshBasicMaterial
-            color="#ffffee"
             toneMapped={false}
             side={THREE.DoubleSide}
           />
         </mesh>
-
-        {/* God-ray streaks during golden hour */}
-        {isGoldenHour && (
-          <>
-            {/* Ray 1 — angled up-right */}
-            <mesh rotation={[0, 0, 0.4]} position={[0, 0, -0.1]}>
-              <planeGeometry args={[1.2, 18]} />
-              <meshBasicMaterial
-                color={sunCol}
-                transparent
-                opacity={0.03}
-                toneMapped={false}
-                depthWrite={false}
-                side={THREE.DoubleSide}
-              />
-            </mesh>
-            {/* Ray 2 — angled opposite */}
-            <mesh rotation={[0, 0, -0.5]} position={[0, 0, -0.1]}>
-              <planeGeometry args={[1.0, 16]} />
-              <meshBasicMaterial
-                color={sunCol}
-                transparent
-                opacity={0.025}
-                toneMapped={false}
-                depthWrite={false}
-                side={THREE.DoubleSide}
-              />
-            </mesh>
-            {/* Ray 3 — near-vertical */}
-            <mesh rotation={[0, 0, 0.1]} position={[0, 0, -0.1]}>
-              <planeGeometry args={[0.8, 20]} />
-              <meshBasicMaterial
-                color={sunCol}
-                transparent
-                opacity={0.02}
-                toneMapped={false}
-                depthWrite={false}
-                side={THREE.DoubleSide}
-              />
-            </mesh>
-          </>
-        )}
       </group>
     </group>
   )
 }
 
-// ── Moon with crescent shadow and moonlight ──────────────
+// ── Moon shader — craters, glow, phase shadow ──────────────
+
+const moonVertexShader = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+const moonFragmentShader = /* glsl */ `
+  uniform float uPhaseOffset;
+  uniform float uTime;
+
+  varying vec2 vUv;
+
+  // Simple hash for crater placement
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  void main() {
+    vec2 center = vUv - 0.5;
+    float dist = length(center) * 2.0;
+
+    // Outer glow
+    float outerGlow = exp(-dist * 2.0) * 0.12;
+    float midGlow = exp(-dist * 4.0) * 0.15;
+
+    // Moon disc
+    float disc = 1.0 - smoothstep(0.28, 0.32, dist);
+
+    // Surface color with subtle variation
+    vec2 surfUv = center * 3.5;
+    float n1 = hash(floor(surfUv * 4.0));
+    float n2 = hash(floor(surfUv * 8.0 + 3.7));
+    float surfaceNoise = n1 * 0.12 + n2 * 0.06;
+
+    // Crater dark spots — several fixed craters
+    float crater = 0.0;
+    // Large mare
+    float c1 = smoothstep(0.12, 0.08, length(center - vec2(-0.04, 0.03)));
+    float c2 = smoothstep(0.08, 0.05, length(center - vec2(0.06, -0.05)));
+    float c3 = smoothstep(0.06, 0.03, length(center - vec2(-0.08, -0.06)));
+    float c4 = smoothstep(0.04, 0.02, length(center - vec2(0.02, 0.08)));
+    float c5 = smoothstep(0.05, 0.02, length(center - vec2(-0.02, -0.01)));
+    crater = max(max(max(c1, c2), max(c3, c4)), c5);
+
+    // Moon base color: silvery white
+    vec3 moonColor = vec3(0.88, 0.90, 0.95);
+    // Darken craters to grey
+    moonColor = mix(moonColor, vec3(0.55, 0.58, 0.62), crater * 0.6);
+    // Surface noise variation
+    moonColor -= surfaceNoise * 0.3;
+    // Limb darkening
+    float limbDark = 1.0 - pow(dist / 0.3, 3.0) * 0.2;
+    moonColor *= limbDark;
+
+    // Phase shadow — dark circle offset to create crescent
+    float shadowDist = length(center - vec2(uPhaseOffset * 0.18, 0.0));
+    float shadow = smoothstep(0.26, 0.29, shadowDist);
+    moonColor *= shadow;
+
+    // Glow color
+    vec3 glowColor = vec3(0.55, 0.60, 0.78);
+
+    vec3 color = moonColor * disc;
+    color += glowColor * outerGlow;
+    color += glowColor * midGlow;
+
+    float alpha = disc + outerGlow + midGlow * 0.5;
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`
 
 function MoonWithPhase({
   position,
@@ -404,18 +430,29 @@ function MoonWithPhase({
 }) {
   const groupRef = useRef<THREE.Group>(null!)
   const moonLightRef = useRef<THREE.DirectionalLight>(null!)
+  const materialRef = useRef<THREE.ShaderMaterial>(null!)
 
-  // Billboard — face the camera
-  useFrame(({ camera }) => {
+  // Phase: slow cycle based on day count approximation
+  const phase = ((timeOfDay / 24) * 0.3 + 0.3)
+  const phaseOffset = Math.cos(phase * Math.PI * 2)
+
+  const uniforms = useMemo(
+    () => ({
+      uPhaseOffset: { value: 0 },
+      uTime: { value: 0 },
+    }),
+    [],
+  )
+
+  useFrame(({ camera, clock }) => {
     if (!groupRef.current) return
     groupRef.current.quaternion.copy(camera.quaternion)
-  })
 
-  // Simple phase: offset a dark sphere to create crescent
-  // Phase cycles over the month, here we use a simple time-based approximation
-  const phase = ((timeOfDay / 24) * 0.3 + 0.3) // just gives a nice crescent offset
-  const shadowOffsetX = 0.6 * Math.cos(phase * Math.PI * 2)
-  const shadowOffsetY = 0.2 * Math.sin(phase * Math.PI * 2)
+    if (materialRef.current) {
+      materialRef.current.uniforms.uPhaseOffset.value = phaseOffset
+      materialRef.current.uniforms.uTime.value = clock.elapsedTime
+    }
+  })
 
   return (
     <group position={position}>
@@ -428,44 +465,16 @@ function MoonWithPhase({
       />
 
       <group ref={groupRef}>
-        {/* Outer glow halo */}
+        {/* Moon rendered via shader on a quad */}
         <mesh>
-          <planeGeometry args={[30, 30]} />
-          <meshBasicMaterial
-            color="#8899bb"
+          <planeGeometry args={[36, 36]} />
+          <shaderMaterial
+            ref={materialRef}
+            vertexShader={moonVertexShader}
+            fragmentShader={moonFragmentShader}
+            uniforms={uniforms}
             transparent
-            opacity={0.03}
-            toneMapped={false}
             depthWrite={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {/* Inner glow */}
-        <mesh>
-          <planeGeometry args={[18, 18]} />
-          <meshBasicMaterial
-            color="#aabbdd"
-            transparent
-            opacity={0.05}
-            toneMapped={false}
-            depthWrite={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {/* Moon disc */}
-        <mesh>
-          <circleGeometry args={[5, 24]} />
-          <meshBasicMaterial
-            color="#dde4f0"
-            toneMapped={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {/* Crescent shadow — dark circle offset to create phase shape */}
-        <mesh position={[shadowOffsetX * 3, shadowOffsetY * 3, 0.1]}>
-          <circleGeometry args={[4.5, 24]} />
-          <meshBasicMaterial
-            color="#111122"
             toneMapped={false}
             side={THREE.DoubleSide}
           />
@@ -501,14 +510,12 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
     [],
   )
 
-  // Palette-driven color/light each frame
   const paletteRef = useRef(getTimePalette(timeOfDay))
 
   useFrame(() => {
     const palette = getTimePalette(timeOfDay)
     paletteRef.current = palette
 
-    // Update sky dome
     if (materialRef.current) {
       const u = materialRef.current.uniforms
       u.uTopColor.value.setRGB(...palette.zenithColor)
@@ -522,7 +529,6 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
       u.uSunColor.value.setRGB(...palette.sunColor)
       u.uHazeStrength.value = palette.hazeStrength
 
-      // Warm band color: blend between sun and horizon color
       const [sr, sg, sb] = palette.sunColor
       const [hr, hg, hb] = palette.horizonColor
       u.uWarmBandColor.value.setRGB(
@@ -532,19 +538,16 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
       )
     }
 
-    // Update directional light
     if (dirLightRef.current) {
       dirLightRef.current.color.setRGB(...palette.sunColor)
       dirLightRef.current.intensity = palette.sunIntensity
     }
 
-    // Update ambient light
     if (ambientRef.current) {
       ambientRef.current.color.setRGB(...palette.ambientColor)
       ambientRef.current.intensity = palette.ambientIntensity
     }
 
-    // Update hemisphere light
     if (hemiRef.current) {
       hemiRef.current.color.setRGB(...palette.zenithColor)
       hemiRef.current.groundColor.setRGB(...palette.groundBounce)
@@ -554,7 +557,6 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
 
   const palette = paletteRef.current
 
-  // Visual sun/moon at a distance the camera can actually see
   const sunDir = new THREE.Vector3(sx, sy, sz).normalize()
   const visualDist = 120
   const visualSunPos: Vec3 = [
@@ -567,9 +569,9 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
 
   return (
     <>
-      {/* Sky dome — large inverted sphere */}
+      {/* Sky dome */}
       <mesh renderOrder={-1}>
-        <sphereGeometry args={[200, 32, 32]} />
+        <sphereGeometry args={[200, 48, 48]} />
         <shaderMaterial
           ref={materialRef}
           vertexShader={skyVertexShader}
@@ -580,7 +582,7 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
         />
       </mesh>
 
-      {/* Sun billboard sprite with god-rays (visible during day) */}
+      {/* Sun with shader-based corona, limb darkening, rays */}
       {isDay && (
         <SunSprite
           position={visualSunPos}
@@ -589,7 +591,7 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
         />
       )}
 
-      {/* Moon with crescent phase shadow (visible at night) */}
+      {/* Moon with shader-based craters, glow, phase shadow */}
       {!isDay && (
         <MoonWithPhase
           position={moonPos}
@@ -597,27 +599,26 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
         />
       )}
 
-      {/* Stars — always rendered, opacity controlled by palette */}
+      {/* Stars */}
       <Stars opacity={palette.starOpacity} />
 
-      {/* Milky Way band — faint stripe across the night sky */}
-      {/* Milky Way effect handled by star density clustering */}
-
-      {/* Directional light from sun direction */}
+      {/* Directional light from sun */}
       <directionalLight
         ref={dirLightRef}
         position={[sx, Math.max(sy, 2), sz]}
         intensity={palette.sunIntensity}
         color={new THREE.Color(...palette.sunColor)}
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={4096}
+        shadow-mapSize-height={4096}
         shadow-camera-near={0.5}
-        shadow-camera-far={100}
-        shadow-camera-left={-20}
-        shadow-camera-right={20}
-        shadow-camera-top={20}
-        shadow-camera-bottom={-20}
+        shadow-camera-far={120}
+        shadow-camera-left={-25}
+        shadow-camera-right={25}
+        shadow-camera-top={25}
+        shadow-camera-bottom={-25}
+        shadow-bias={-0.0003}
+        shadow-normalBias={0.02}
       />
 
       {/* Ambient fill */}
@@ -627,7 +628,7 @@ export default function SkyScene({ sunPosition, timeOfDay, visible }: SkyScenePr
         color={new THREE.Color(...palette.ambientColor)}
       />
 
-      {/* Hemisphere light: sky vs ground */}
+      {/* Hemisphere light */}
       <hemisphereLight
         ref={hemiRef}
         args={[

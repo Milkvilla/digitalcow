@@ -367,22 +367,22 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
         {/* Chest (front shoulder area) */}
         <mesh ref={chestRef} position={[0.34, 0.62, 0]} castShadow>
           <sphereGeometry args={[0.27, 22, 18]} />
-          <meshStandardMaterial color={breed.bodyColor} />
+          <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
         </mesh>
         {/* Front barrel (mid-body, stretched along X) */}
         <mesh ref={barrelRef} position={[0.05, 0.58, 0]} scale={[1.3, 1.0, 1.0]} castShadow>
           <sphereGeometry args={[0.33, 22, 18]} />
-          <meshStandardMaterial color={breed.bodyColor} />
+          <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
         </mesh>
         {/* Rear barrel */}
         <mesh position={[-0.28, 0.57, 0]} scale={[1.3, 1.0, 1.0]} castShadow>
           <sphereGeometry args={[0.31, 22, 18]} />
-          <meshStandardMaterial color={breed.bodyColor} />
+          <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
         </mesh>
         {/* Hip (rear) */}
         <mesh ref={hipRef} position={[-0.52, 0.54, 0]} castShadow>
           <sphereGeometry args={[0.27, 22, 18]} />
-          <meshStandardMaterial color={breed.bodyColor} />
+          <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
         </mesh>
 
         {/* ═══ SPOTS — breed-driven, projected onto body surface ═══ */}
@@ -404,19 +404,19 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
         {/* ═══ SPINE RIDGE (subtle, adds realism) ═══ */}
         <mesh position={[-0.08, 0.88, 0]} scale={[0.70, 0.04, 0.08]} rotation={[0, 0, 0.05]}>
           <sphereGeometry args={[1, 8, 6]} />
-          <meshStandardMaterial color={breed.bodyColor} />
+          <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
         </mesh>
 
         {/* ═══ NECK ═══ */}
         <mesh ref={neckRef} position={[0.48, 0.78, 0]} rotation={[0, 0, -0.45]} castShadow>
           <cylinderGeometry args={[0.12, 0.20, 0.28, 12]} />
-          <meshStandardMaterial color={breed.bodyColor} />
+          <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
         </mesh>
 
         {/* ═══ DEWLAP (throat skin fold — characteristic of cattle) ═══ */}
         <mesh position={[0.46, 0.58, 0]} scale={[0.10, 0.14, 0.06]}>
           <sphereGeometry args={[1, 6, 6]} />
-          <meshStandardMaterial color={breed.skinColor} />
+          <meshStandardMaterial color={breed.skinColor} roughness={0.65} />
         </mesh>
 
         {/* ═══ BELL ═══ */}
@@ -440,19 +440,19 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
           {/* Main head — slightly elongated forward */}
           <mesh castShadow scale={[1.15, 1.0, 0.95]}>
             <sphereGeometry args={[0.20, 18, 14]} />
-            <meshStandardMaterial color={breed.bodyColor} />
+            <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
           </mesh>
 
           {/* Forehead / brow ridge */}
           <mesh position={[0.06, 0.10, 0]} scale={[0.8, 0.35, 0.9]}>
             <sphereGeometry args={[0.18, 10, 8]} />
-            <meshStandardMaterial color={breed.bodyColor} />
+            <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
           </mesh>
 
           {/* Muzzle / snout — broad and flat, like a real cow */}
           <mesh position={[0.20, -0.08, 0]} scale={[0.9, 0.8, 1.1]}>
             <sphereGeometry args={[0.14, 12, 10]} />
-            <meshStandardMaterial color={breed.muzzleColor} />
+            <meshStandardMaterial color={breed.muzzleColor} roughness={0.6} />
           </mesh>
 
           {/* Nose pad (darker, slightly raised) */}
@@ -480,7 +480,7 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
           {/* Lower jaw */}
           <mesh ref={jawRef} position={[0.20, -0.17, 0]}>
             <boxGeometry args={[0.12, 0.035, 0.10]} />
-            <meshStandardMaterial color={breed.muzzleColor} />
+            <meshStandardMaterial color={breed.muzzleColor} roughness={0.6} />
           </mesh>
 
           {/* Left eye — set into head, not protruding */}
@@ -526,11 +526,11 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
           {/* Ears — wide, horizontal, leaf-shaped */}
           <mesh ref={earLeftRef} position={[-0.08, 0.10, 0.18]} rotation={[0.3, 0.15, 0.5]} scale={[1.3 * breed.earScale, 0.45 * breed.earScale, 1.2 * breed.earScale]}>
             <coneGeometry args={[0.10, 0.22, 6]} />
-            <meshStandardMaterial color={breed.skinColor} />
+            <meshStandardMaterial color={breed.skinColor} roughness={0.65} />
           </mesh>
           <mesh ref={earRightRef} position={[-0.08, 0.10, -0.18]} rotation={[-0.3, -0.15, 0.5]} scale={[1.3 * breed.earScale, 0.45 * breed.earScale, 1.2 * breed.earScale]}>
             <coneGeometry args={[0.10, 0.22, 6]} />
-            <meshStandardMaterial color={breed.skinColor} />
+            <meshStandardMaterial color={breed.skinColor} roughness={0.65} />
           </mesh>
 
           {/* Horns — breed-scaled, hidden on calves */}
@@ -538,11 +538,11 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
             <>
               <mesh position={[-0.04, 0.18, breed.hornSpread]} rotation={[0.3, 0, breed.hornCurve]} scale={hornGrowth}>
                 <coneGeometry args={[0.03 * breed.hornLength, 0.20 * breed.hornLength, 6]} />
-                <meshStandardMaterial color={breed.hornColor} />
+                <meshStandardMaterial color={breed.hornColor} roughness={0.55} metalness={0.08} />
               </mesh>
               <mesh position={[-0.04, 0.18, -breed.hornSpread]} rotation={[-0.3, 0, breed.hornCurve]} scale={hornGrowth}>
                 <coneGeometry args={[0.03 * breed.hornLength, 0.20 * breed.hornLength, 6]} />
-                <meshStandardMaterial color={breed.hornColor} />
+                <meshStandardMaterial color={breed.hornColor} roughness={0.55} metalness={0.08} />
               </mesh>
             </>
           )}
@@ -562,20 +562,20 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
         <group ref={legFLRef} position={[0.30, 0.36, 0.15]}>
           <mesh position={[0, -0.06 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.055, 0.048, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legFrontColor} />
+            <meshStandardMaterial color={breed.legFrontColor} roughness={0.78} />
           </mesh>
           {/* Knee joint */}
           <mesh position={[0, -0.18 * legScale, 0]}>
             <sphereGeometry args={[0.05, 6, 6]} />
-            <meshStandardMaterial color={breed.legFrontColor} />
+            <meshStandardMaterial color={breed.legFrontColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.32 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.04, 0.035, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legFrontColor} />
+            <meshStandardMaterial color={breed.legFrontColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.44 * legScale, 0]}>
             <cylinderGeometry args={[0.048, 0.052, 0.04, 12]} />
-            <meshStandardMaterial color={breed.hoofColor} />
+            <meshStandardMaterial color={breed.hoofColor} roughness={0.85} metalness={0.05} />
           </mesh>
         </group>
 
@@ -583,19 +583,19 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
         <group ref={legFRRef} position={[0.30, 0.36, -0.15]}>
           <mesh position={[0, -0.06 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.055, 0.048, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legFrontColor} />
+            <meshStandardMaterial color={breed.legFrontColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.18 * legScale, 0]}>
             <sphereGeometry args={[0.05, 6, 6]} />
-            <meshStandardMaterial color={breed.legFrontColor} />
+            <meshStandardMaterial color={breed.legFrontColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.32 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.04, 0.035, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legFrontColor} />
+            <meshStandardMaterial color={breed.legFrontColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.44 * legScale, 0]}>
             <cylinderGeometry args={[0.048, 0.052, 0.04, 12]} />
-            <meshStandardMaterial color={breed.hoofColor} />
+            <meshStandardMaterial color={breed.hoofColor} roughness={0.85} metalness={0.05} />
           </mesh>
         </group>
 
@@ -603,19 +603,19 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
         <group ref={legBLRef} position={[-0.48, 0.36, 0.15]}>
           <mesh position={[0, -0.06 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.06, 0.05, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legBackColor} />
+            <meshStandardMaterial color={breed.legBackColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.18 * legScale, 0]}>
             <sphereGeometry args={[0.052, 6, 6]} />
-            <meshStandardMaterial color={breed.legBackColor} />
+            <meshStandardMaterial color={breed.legBackColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.32 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.042, 0.036, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legBackColor} />
+            <meshStandardMaterial color={breed.legBackColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.44 * legScale, 0]}>
             <cylinderGeometry args={[0.048, 0.052, 0.04, 12]} />
-            <meshStandardMaterial color={breed.hoofColor} />
+            <meshStandardMaterial color={breed.hoofColor} roughness={0.85} metalness={0.05} />
           </mesh>
         </group>
 
@@ -623,19 +623,19 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
         <group ref={legBRRef} position={[-0.48, 0.36, -0.15]}>
           <mesh position={[0, -0.06 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.06, 0.05, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legBackColor} />
+            <meshStandardMaterial color={breed.legBackColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.18 * legScale, 0]}>
             <sphereGeometry args={[0.052, 6, 6]} />
-            <meshStandardMaterial color={breed.legBackColor} />
+            <meshStandardMaterial color={breed.legBackColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.32 * legScale, 0]} castShadow>
             <cylinderGeometry args={[0.042, 0.036, 0.22 * legScale, 12]} />
-            <meshStandardMaterial color={breed.legBackColor} />
+            <meshStandardMaterial color={breed.legBackColor} roughness={0.78} />
           </mesh>
           <mesh position={[0, -0.44 * legScale, 0]}>
             <cylinderGeometry args={[0.048, 0.052, 0.04, 12]} />
-            <meshStandardMaterial color={breed.hoofColor} />
+            <meshStandardMaterial color={breed.hoofColor} roughness={0.85} metalness={0.05} />
           </mesh>
         </group>
 
@@ -643,11 +643,11 @@ export function CowPlaceholder({ behavior, breed: breedId = 'holstein', age = 1.
         <group ref={tailRef} position={[-0.66, 0.62, 0]}>
           <mesh rotation={[0, 0, -0.5]} castShadow>
             <cylinderGeometry args={[0.020, 0.016, 0.24, 5]} />
-            <meshStandardMaterial color={breed.bodyColor} />
+            <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
           </mesh>
           <mesh position={[-0.08, -0.22, 0]} rotation={[0, 0, -0.3]}>
             <cylinderGeometry args={[0.014, 0.008, 0.22, 5]} />
-            <meshStandardMaterial color={breed.bodyColor} />
+            <meshStandardMaterial color={breed.bodyColor} roughness={0.75} metalness={0} />
           </mesh>
           <mesh position={[-0.14, -0.40, 0]}>
             <sphereGeometry args={[0.035, 6, 6]} />

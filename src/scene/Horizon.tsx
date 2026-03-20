@@ -1,106 +1,229 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
+import type { Vec3 } from '../engine/types.ts'
 import { getTimePalette } from '../engine/palette.ts'
 import { SUNRISE_HOUR, SUNSET_HOUR } from '../engine/constants.ts'
 
-// ── Seeded pseudo-random for deterministic generation ────
+// ── Seeded pseudo-random ───────────────────────────────
 
 function seededRandom(seed: number): number {
   const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453
   return x - Math.floor(x)
 }
 
-// ── Fractal noise height for natural hill profiles ──────
+// ── Mountain profile generator ─────────────────────────
 
-function fractalHillHeight(t: number, seed: number): number {
-  // Multiple octaves of sine with different frequencies/amplitudes
+function mountainProfile(
+  t: number,
+  segIndex: number,
+  seed: number,
+  heightScale: number,
+  jaggedness: number,
+): number {
+  const segSeed = segIndex * 37.13 + seed
+
+  // Per-segment height modifiers for variety
+  const peakMult = 0.4 + seededRandom(segSeed * 2.71) * 1.6
+  const isTall = seededRandom(segSeed * 4.13) > 0.72
+  const peakBoost = isTall ? 2.2 : 1.0
+  const isValley = seededRandom(segSeed * 6.17) > 0.90
+  const valleyFactor = isValley ? 0.12 : 1.0
+
+  const effectiveScale = heightScale * peakMult * peakBoost * valleyFactor
+
+  // Multi-frequency fractal
   let h = 0
-  h += Math.sin(t * Math.PI + seed) * 1.0                        // base bump
-  h += Math.sin(t * Math.PI * 2.3 + seed * 1.7) * 0.45          // secondary
-  h += Math.sin(t * Math.PI * 4.7 + seed * 3.1) * 0.2           // detail
-  h += Math.sin(t * Math.PI * 0.5 + seed * 0.3) * 0.6           // broad variation
-  h += Math.sin(t * Math.PI * 7.1 + seed * 5.9) * 0.08          // fine detail
-  return Math.max(h, 0) // clamp to non-negative
+  h += Math.sin(t * Math.PI + segSeed) * 1.0
+  h += Math.sin(t * Math.PI * 2.3 + segSeed * 1.7) * 0.45
+  h += Math.sin(t * Math.PI * 4.7 + segSeed * 3.1) * 0.22 * (1 + jaggedness)
+  h += Math.sin(t * Math.PI * 0.5 + segSeed * 0.3) * 0.6
+  // High-frequency jagged detail
+  h += Math.sin(t * Math.PI * 9 + seed * 7.3) * 0.12 * jaggedness
+  h += Math.sin(t * Math.PI * 17 + seed * 13.1) * 0.06 * jaggedness
+
+  h = Math.max(h, 0.05)
+  return h * effectiveScale
 }
 
-// ── Hill silhouette ring ─────────────────────────────────
+// ── Build a single merged ring geometry with vertical subdivisions ──
 
-interface HillSegment {
-  geometry: THREE.BufferGeometry
-}
-
-function generateHillRing(
+function buildMountainRing(
   radius: number,
   segments: number,
+  vertDivs: number,
   baseY: number,
   heightScale: number,
-  subDivisions: number,
-): HillSegment[] {
-  const hills: HillSegment[] = []
-  const angleStep = (Math.PI * 2) / segments
+  jaggedness: number,
+  seed: number,
+): { geometry: THREE.BufferGeometry; maxHeight: number } {
+  const positions: number[] = []
+  const indices: number[] = []
+  const totalAngle = Math.PI * 2
+  const totalAngularPts = segments * 4 + 1 // 4 sub-divisions per segment
+  let maxHeight = 0
 
-  for (let i = 0; i < segments; i++) {
-    const angle0 = i * angleStep
-    const angle1 = (i + 1) * angleStep
+  // Generate vertices
+  for (let ai = 0; ai <= totalAngularPts - 1; ai++) {
+    const angT = ai / (totalAngularPts - 1)
+    const angle = angT * totalAngle
+    const segIdx = Math.floor(angT * segments)
+    const localT = (angT * segments) - segIdx
 
-    // Vary hill height dramatically — some tall ridges, gentle rolls, flat stretches
-    const seed = i * 37.13 + radius * 7.3
-    const peakMultiplier = 0.4 + seededRandom(seed * 2.71) * 1.8 // 0.4 to 2.2
+    const peakH = mountainProfile(localT, segIdx, seed, heightScale, jaggedness)
+    const absTop = baseY + peakH
+    if (absTop > maxHeight) maxHeight = absTop
 
-    // Occasional tall peaks
-    const isTallPeak = seededRandom(seed * 4.13) > 0.82
-    const peakBoost = isTallPeak ? 1.8 : 1.0
+    for (let vi = 0; vi <= vertDivs; vi++) {
+      const vt = vi / vertDivs
+      const y = baseY + peakH * vt
+      // Mountains lean very slightly inward at the top
+      const r = radius - vt * 0.4
 
-    // Occasional flat stretches
-    const isFlat = seededRandom(seed * 6.17) > 0.88
-    const flatFactor = isFlat ? 0.2 : 1.0
-
-    const effectiveHeight = heightScale * peakMultiplier * peakBoost * flatFactor
-
-    const vertices: number[] = []
-    const indices: number[] = []
-
-    for (let s = 0; s <= subDivisions; s++) {
-      const t = s / subDivisions
-      const angle = angle0 + (angle1 - angle0) * t
-
-      const x = Math.cos(angle) * radius
-      const z = Math.sin(angle) * radius
-
-      // Fractal noise height profile
-      const h = baseY + effectiveHeight * fractalHillHeight(t, seed)
-
-      // Bottom vertex
-      vertices.push(x, baseY - 0.5, z)
-      // Top vertex
-      vertices.push(x, h, z)
+      positions.push(Math.cos(angle) * r, y, Math.sin(angle) * r)
     }
-
-    // Build triangle strip
-    for (let s = 0; s < subDivisions; s++) {
-      const bl = s * 2
-      const br = (s + 1) * 2
-      const tl = s * 2 + 1
-      const tr = (s + 1) * 2 + 1
-
-      indices.push(bl, br, tl)
-      indices.push(br, tr, tl)
-    }
-
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute(
-      'position',
-      new THREE.Float32BufferAttribute(vertices, 3),
-    )
-    geo.setIndex(indices)
-    geo.computeVertexNormals()
-
-    hills.push({ geometry: geo })
   }
 
-  return hills
+  // Build triangle indices
+  const stride = vertDivs + 1
+  for (let ai = 0; ai < totalAngularPts - 1; ai++) {
+    for (let vi = 0; vi < vertDivs; vi++) {
+      const a = ai * stride + vi
+      const b = (ai + 1) * stride + vi
+      const c = ai * stride + vi + 1
+      const d = (ai + 1) * stride + vi + 1
+      indices.push(a, b, c)
+      indices.push(b, d, c)
+    }
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geo.setIndex(indices)
+  geo.computeVertexNormals()
+
+  return { geometry: geo, maxHeight }
 }
+
+// ── GLSL shaders ───────────────────────────────────────
+
+const mountainVertexShader = /* glsl */ `
+  uniform float uBaseY;
+
+  varying float vWorldY;
+  varying float vDistance;
+  varying vec3 vNormal;
+  varying vec3 vWorldPos;
+
+  void main() {
+    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    vWorldPos = worldPos.xyz;
+    vWorldY = worldPos.y;
+    vDistance = length(worldPos.xz);
+    vNormal = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * viewMatrix * worldPos;
+  }
+`
+
+const mountainFragmentShader = /* glsl */ `
+  uniform vec3 uSunDir;
+  uniform vec3 uSunColor;
+  uniform vec3 uHazeColor;
+  uniform float uHazeNear;
+  uniform float uHazeFar;
+  uniform float uSnowLine;     // world Y above which snow appears
+  uniform float uMaxHeight;
+  uniform float uBaseY;
+  uniform float uAmbient;
+  uniform float uTime;
+
+  varying float vWorldY;
+  varying float vDistance;
+  varying vec3 vNormal;
+  varying vec3 vWorldPos;
+
+  // Simple hash noise
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  float noise2D(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  }
+
+  void main() {
+    float heightRange = max(uMaxHeight - uBaseY, 0.1);
+    float h = clamp((vWorldY - uBaseY) / heightRange, 0.0, 1.0);
+
+    // Procedural noise for surface variation
+    float surfNoise = noise2D(vWorldPos.xz * 0.8) * 0.15;
+    float detailNoise = noise2D(vWorldPos.xz * 3.0) * 0.08;
+
+    // ── Height-based biome coloring ──
+    vec3 deepBase   = vec3(0.025, 0.045, 0.02);    // dark earth at very bottom
+    vec3 forestLow  = vec3(0.05, 0.12, 0.035);     // dark conifer forest
+    vec3 forestHigh = vec3(0.08, 0.17, 0.05);      // lighter forest
+    vec3 treeline   = vec3(0.12, 0.14, 0.08);      // sparse tree/shrub zone
+    vec3 rockLow    = vec3(0.18, 0.16, 0.14);      // gray-brown rock
+    vec3 rockHigh   = vec3(0.30, 0.28, 0.26);      // lighter rock near peaks
+    vec3 snow       = vec3(0.82, 0.85, 0.90);      // snow
+
+    vec3 color;
+    if (h < 0.08) {
+      color = mix(deepBase, forestLow, h / 0.08);
+    } else if (h < 0.30) {
+      color = mix(forestLow, forestHigh, (h - 0.08) / 0.22);
+    } else if (h < 0.50) {
+      color = mix(forestHigh, treeline, (h - 0.30) / 0.20);
+    } else if (h < 0.68) {
+      color = mix(treeline, rockLow, (h - 0.50) / 0.18);
+    } else if (h < 0.85) {
+      color = mix(rockLow, rockHigh, (h - 0.68) / 0.17);
+    } else {
+      color = mix(rockHigh, snow, (h - 0.85) / 0.15);
+    }
+
+    // Snow accumulation above snow line with noise edge
+    float snowH = (vWorldY - uSnowLine) / max(uMaxHeight - uSnowLine, 0.1);
+    float snowNoise = noise2D(vWorldPos.xz * 2.5) * 0.25 - 0.1;
+    float snowFactor = smoothstep(0.0, 0.35, snowH + snowNoise);
+    // Snow prefers more horizontal surfaces (normals pointing up)
+    float slopeFactor = smoothstep(0.3, 0.7, vNormal.y);
+    color = mix(color, snow, snowFactor * slopeFactor * 0.9);
+
+    // Surface noise variation (different rock/vegetation patches)
+    color += (surfNoise - 0.075) * vec3(0.06, 0.05, 0.03);
+    color += (detailNoise - 0.04) * vec3(0.03, 0.04, 0.02);
+
+    // ── Lighting ──
+    vec3 norm = normalize(vNormal);
+    float NdotL = max(dot(norm, normalize(uSunDir)), 0.0);
+    // Wrap diffuse for softer shadows
+    float wrapDiffuse = NdotL * 0.6 + 0.4;
+    // Slight rim light for depth
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    float rim = pow(1.0 - max(dot(norm, viewDir), 0.0), 3.0) * 0.08;
+
+    vec3 lit = color * (uAmbient + wrapDiffuse * (1.0 - uAmbient)) * uSunColor;
+    lit += rim * uSunColor * 0.3;
+
+    // ── Atmospheric haze ──
+    float hazeFactor = smoothstep(uHazeNear, uHazeFar, vDistance);
+    // Height-based haze: lower areas get more haze (valley fog)
+    float valleyHaze = (1.0 - h) * 0.15;
+    hazeFactor = min(hazeFactor + valleyHaze, 0.92);
+    lit = mix(lit, uHazeColor, hazeFactor);
+
+    gl_FragColor = vec4(lit, 1.0);
+  }
+`
 
 // ── Tree silhouette shapes ──────────────────────────────
 
@@ -113,21 +236,18 @@ interface TreeSilhouette {
   shape: TreeShape
 }
 
-// Pine tree — triangular (cone)
 const pineGeo = (() => {
   const geo = new THREE.ConeGeometry(0.35, 1.0, 4)
-  geo.translate(0, 0.5, 0) // base at origin
+  geo.translate(0, 0.5, 0)
   return geo
 })()
 
-// Deciduous tree — round (sphere on stick)
 const deciduousGeo = (() => {
   const geo = new THREE.SphereGeometry(0.45, 6, 4)
   geo.translate(0, 0.7, 0)
   return geo
 })()
 
-// Tall thin tree — narrow cylinder topped with small sphere
 const tallGeo = (() => {
   const geo = new THREE.CylinderGeometry(0.12, 0.15, 1.0, 4)
   geo.translate(0, 0.5, 0)
@@ -142,8 +262,6 @@ function getTreeGeometry(shape: TreeShape): THREE.BufferGeometry {
   }
 }
 
-// ── Generate clustered trees with varied shapes ─────────
-
 function generateTreeSilhouettes(
   radius: number,
   clusterCount: number,
@@ -152,16 +270,13 @@ function generateTreeSilhouettes(
   const trees: TreeSilhouette[] = []
   const totalAngle = Math.PI * 2
 
-  // Create clusters with gaps
   for (let c = 0; c < clusterCount; c++) {
     const clusterSeed = c * 51.7
-    // Skip some positions to create gaps
     if (seededRandom(clusterSeed * 3.3) > 0.75) continue
 
     const clusterAngle = (c / clusterCount) * totalAngle + seededRandom(clusterSeed) * 0.3
-    const treesInCluster = 2 + Math.floor(seededRandom(clusterSeed * 1.7) * 4) // 2-5 trees
+    const treesInCluster = 2 + Math.floor(seededRandom(clusterSeed * 1.7) * 4)
 
-    // Pick a shape tendency for the cluster
     const shapeRoll = seededRandom(clusterSeed * 2.1)
     const clusterShape: TreeShape = shapeRoll < 0.4 ? 'pine' : shapeRoll < 0.75 ? 'deciduous' : 'tall'
 
@@ -171,30 +286,23 @@ function generateTreeSilhouettes(
       const angle = clusterAngle + angleOffset
       const r = radius + (seededRandom(treeSeed * 2.3) - 0.5) * 4
 
-      // Approximate hill height at this position
       const segmentIndex = Math.floor((angle / totalAngle) * 40) % 40
       const seed = segmentIndex * 37.13 + radius * 7.3
       const localT = (angle % (totalAngle / 40)) / (totalAngle / 40)
-      const hillH = fractalHillHeight(localT, seed)
+      const hillH = mountainProfile(localT, segmentIndex, seed, 2.5, 0.2)
       const y = baseY + hillH * 0.5
 
-      // Vary shape within cluster (mostly cluster shape, some variation)
       let shape = clusterShape
       if (seededRandom(treeSeed * 4.1) > 0.7) {
         const shapes: TreeShape[] = ['pine', 'deciduous', 'tall']
         shape = shapes[Math.floor(seededRandom(treeSeed * 5.3) * 3)]
       }
 
-      // Significantly vary height
       const heightBase = shape === 'tall' ? 2.5 : shape === 'pine' ? 1.8 : 1.5
       const heightVar = heightBase + seededRandom(treeSeed * 3.7) * 2.5
 
       trees.push({
-        position: new THREE.Vector3(
-          Math.cos(angle) * r,
-          y,
-          Math.sin(angle) * r,
-        ),
+        position: new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r),
         height: heightVar,
         width: 0.4 + seededRandom(treeSeed * 6.1) * 0.8,
         shape,
@@ -204,7 +312,7 @@ function generateTreeSilhouettes(
   return trees
 }
 
-// ── Farmstead silhouette (distant farmhouse + silo) ──────
+// ── Farmstead silhouettes ──────────────────────────────
 
 interface FarmBuilding {
   position: THREE.Vector3
@@ -214,12 +322,11 @@ interface FarmBuilding {
 
 function generateFarmstead(radius: number, baseY: number): FarmBuilding[] {
   const buildings: FarmBuilding[] = []
-  const farmAngle = Math.PI * 0.35 // place farmstead on one side
+  const farmAngle = Math.PI * 0.35
 
   const farmX = Math.cos(farmAngle) * radius
   const farmZ = Math.sin(farmAngle) * radius
 
-  // Main farmhouse — rectangular box with triangular roof
   const houseGeo = new THREE.BoxGeometry(1, 1, 1)
   houseGeo.translate(0, 0.5, 0)
   buildings.push({
@@ -228,7 +335,6 @@ function generateFarmstead(radius: number, baseY: number): FarmBuilding[] {
     scaleVec: [2.5, 2.0, 1.8],
   })
 
-  // Roof — triangular prism (cone with 4 sides stretched)
   const roofGeo = new THREE.ConeGeometry(1.0, 0.8, 4)
   roofGeo.rotateY(Math.PI / 4)
   roofGeo.translate(0, 0.4, 0)
@@ -238,7 +344,6 @@ function generateFarmstead(radius: number, baseY: number): FarmBuilding[] {
     scaleVec: [1.8, 1.5, 1.3],
   })
 
-  // Small barn/shed next to farmhouse
   const shedGeo = new THREE.BoxGeometry(1, 1, 1)
   shedGeo.translate(0, 0.5, 0)
   const shedOffset = 4.5
@@ -252,7 +357,6 @@ function generateFarmstead(radius: number, baseY: number): FarmBuilding[] {
     scaleVec: [1.8, 1.5, 1.5],
   })
 
-  // Silo — tall cylinder
   const siloGeo = new THREE.CylinderGeometry(0.4, 0.4, 1, 8)
   siloGeo.translate(0, 0.5, 0)
   const siloOffset = 2.5
@@ -266,9 +370,7 @@ function generateFarmstead(radius: number, baseY: number): FarmBuilding[] {
     scaleVec: [1.0, 4.5, 1.0],
   })
 
-  // Silo cap (dome)
   const siloCapGeo = new THREE.SphereGeometry(0.45, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2)
-  siloCapGeo.translate(0, 0, 0)
   buildings.push({
     position: new THREE.Vector3(
       farmX + Math.cos(farmAngle - 0.06) * siloOffset,
@@ -282,118 +384,174 @@ function generateFarmstead(radius: number, baseY: number): FarmBuilding[] {
   return buildings
 }
 
-// ── Horizon component ────────────────────────────────────
+// ── Horizon component ──────────────────────────────────
 
-export default function Horizon({ timeOfDay }: { timeOfDay: number }) {
-  const nearMaterialRef = useRef<THREE.MeshBasicMaterial>(null!)
-  const farMaterialRef = useRef<THREE.MeshBasicMaterial>(null!)
-  const veryFarMaterialRef = useRef<THREE.MeshBasicMaterial>(null!)
+interface HorizonProps {
+  timeOfDay: number
+  sunPosition: Vec3
+}
+
+export default function Horizon({ timeOfDay, sunPosition }: HorizonProps) {
+  const nearMatRef = useRef<THREE.ShaderMaterial>(null!)
+  const midMatRef = useRef<THREE.ShaderMaterial>(null!)
+  const farMatRef = useRef<THREE.ShaderMaterial>(null!)
   const treeMaterialRef = useRef<THREE.MeshBasicMaterial>(null!)
   const farmMaterialRef = useRef<THREE.MeshBasicMaterial>(null!)
 
-  // Generate hill rings at three distances for depth
-  const { nearHills, farHills, veryFarHills, trees, farmstead } = useMemo(() => {
+  const {
+    nearRing, midRing, farRing,
+    nearMaxH, midMaxH, farMaxH,
+    trees, farmstead,
+  } = useMemo(() => {
+    const near = buildMountainRing(45, 50, 5, -0.5, 3.0, 0.2, 1.0)
+    const mid = buildMountainRing(60, 45, 5, -0.3, 5.0, 0.5, 2.0)
+    const far = buildMountainRing(78, 40, 6, -0.2, 8.0, 0.8, 3.0)
+
     return {
-      nearHills: generateHillRing(48, 40, -0.5, 2.5, 8),
-      farHills: generateHillRing(58, 35, -0.3, 3.0, 7),
-      veryFarHills: generateHillRing(70, 30, -0.2, 4.5, 6), // 3rd distant ring
-      trees: generateTreeSilhouettes(48, 30, -0.5),
+      nearRing: near.geometry,
+      midRing: mid.geometry,
+      farRing: far.geometry,
+      nearMaxH: near.maxHeight,
+      midMaxH: mid.maxHeight,
+      farMaxH: far.maxHeight,
+      trees: generateTreeSilhouettes(45, 30, -0.5),
       farmstead: generateFarmstead(50, -0.3),
     }
   }, [])
 
-  useFrame(() => {
+  // Shared uniform objects (created once, mutated in useFrame)
+  const nearUniforms = useMemo(() => ({
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    uSunColor: { value: new THREE.Vector3(1, 1, 0.95) },
+    uHazeColor: { value: new THREE.Vector3(0.5, 0.6, 0.7) },
+    uHazeNear: { value: 30.0 },
+    uHazeFar: { value: 55.0 },
+    uSnowLine: { value: 999.0 }, // no snow on near hills
+    uMaxHeight: { value: nearMaxH },
+    uBaseY: { value: -0.5 },
+    uAmbient: { value: 0.4 },
+    uTime: { value: 0.0 },
+  }), [nearMaxH])
+
+  const midUniforms = useMemo(() => ({
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    uSunColor: { value: new THREE.Vector3(1, 1, 0.95) },
+    uHazeColor: { value: new THREE.Vector3(0.5, 0.6, 0.7) },
+    uHazeNear: { value: 38.0 },
+    uHazeFar: { value: 72.0 },
+    uSnowLine: { value: midMaxH * 0.82 },
+    uMaxHeight: { value: midMaxH },
+    uBaseY: { value: -0.3 },
+    uAmbient: { value: 0.4 },
+    uTime: { value: 0.0 },
+  }), [midMaxH])
+
+  const farUniforms = useMemo(() => ({
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    uSunColor: { value: new THREE.Vector3(1, 1, 0.95) },
+    uHazeColor: { value: new THREE.Vector3(0.5, 0.6, 0.7) },
+    uHazeNear: { value: 48.0 },
+    uHazeFar: { value: 90.0 },
+    uSnowLine: { value: farMaxH * 0.55 },
+    uMaxHeight: { value: farMaxH },
+    uBaseY: { value: -0.2 },
+    uAmbient: { value: 0.4 },
+    uTime: { value: 0.0 },
+  }), [farMaxH])
+
+  useFrame((_state, delta) => {
     const palette = getTimePalette(timeOfDay)
     const [hr, hg, hb] = palette.horizonColor
+    const [sr, sg, sb] = palette.sunColor
 
-    // Time-of-day coloring: hills closer to sun direction get warmer
     const isDawnOrDusk =
       (timeOfDay > SUNRISE_HOUR - 1 && timeOfDay < SUNRISE_HOUR + 2) ||
       (timeOfDay > SUNSET_HOUR - 2 && timeOfDay < SUNSET_HOUR + 1)
-    const warmBoost = isDawnOrDusk ? 0.08 : 0.0
 
-    // Near hills — dark silhouettes with subtle horizon tint
-    if (nearMaterialRef.current) {
-      nearMaterialRef.current.color.setRGB(
-        hr * 0.08 + warmBoost * 0.5,
-        hg * 0.08 + warmBoost * 0.25,
-        hb * 0.10,
-      )
+    // Sun direction from sunPosition prop
+    const sunDir = new THREE.Vector3(sunPosition[0], sunPosition[1], sunPosition[2]).normalize()
+
+    // Ambient based on sun height (brighter midday, dim at night)
+    const sunHeight = Math.max(sunDir.y, 0)
+    const ambient = 0.18 + sunHeight * 0.52
+
+    // Sun color for lighting (brighter during day)
+    const dayFactor = Math.max(sunHeight * 1.5, 0.15)
+    const litR = sr * dayFactor
+    const litG = sg * dayFactor
+    const litB = sb * dayFactor
+
+    // Haze color: blend between horizon color and a warm tint at dawn/dusk
+    const warmBoost = isDawnOrDusk ? 0.12 : 0.0
+    const hazeR = hr * 0.85 + warmBoost * 0.5
+    const hazeG = hg * 0.85 + warmBoost * 0.25
+    const hazeB = hb * 0.85
+
+    // Update all three ring materials
+    for (const uniforms of [nearUniforms, midUniforms, farUniforms]) {
+      uniforms.uSunDir.value.copy(sunDir)
+      uniforms.uSunColor.value.set(litR, litG, litB)
+      uniforms.uHazeColor.value.set(hazeR, hazeG, hazeB)
+      uniforms.uAmbient.value = ambient
+      uniforms.uTime.value += delta
     }
 
-    // Far hills — slightly lighter, more atmospheric
-    if (farMaterialRef.current) {
-      farMaterialRef.current.color.setRGB(
-        hr * 0.12 + warmBoost * 0.3,
-        hg * 0.12 + warmBoost * 0.15,
-        hb * 0.15,
-      )
-    }
+    // Trees and farmstead: silhouette color with atmospheric tint
+    const treeR = hr * 0.06 + warmBoost * 0.3
+    const treeG = hg * 0.06 + warmBoost * 0.15
+    const treeB = hb * 0.09
 
-    // Very far hills — hazier but still dark
-    if (veryFarMaterialRef.current) {
-      veryFarMaterialRef.current.color.setRGB(
-        hr * 0.16 + warmBoost * 0.2,
-        hg * 0.16 + warmBoost * 0.1,
-        hb * 0.20,
-      )
-    }
-
-    // Trees slightly darker than near hills
     if (treeMaterialRef.current) {
-      treeMaterialRef.current.color.setRGB(
-        hr * 0.05,
-        hg * 0.05,
-        hb * 0.08,
-      )
+      treeMaterialRef.current.color.setRGB(treeR, treeG, treeB)
     }
-
-    // Farmstead — same as trees
     if (farmMaterialRef.current) {
       farmMaterialRef.current.color.setRGB(
-        hr * 0.06,
-        hg * 0.06,
-        hb * 0.09,
+        treeR * 1.1 + 0.01,
+        treeG * 1.1 + 0.005,
+        treeB * 1.1,
       )
     }
   })
 
   return (
     <group>
-      {/* Very far hills (deepest backdrop) */}
-      {veryFarHills.map((hill, i) => (
-        <mesh key={`vfar-${i}`} geometry={hill.geometry} renderOrder={-3}>
-          <meshBasicMaterial
-            ref={i === 0 ? veryFarMaterialRef : undefined}
-            color="#121828"
-            fog
-          />
-        </mesh>
-      ))}
+      {/* Far mountain ring — dramatic peaks with snow */}
+      <mesh geometry={farRing} renderOrder={-3}>
+        <shaderMaterial
+          ref={farMatRef}
+          vertexShader={mountainVertexShader}
+          fragmentShader={mountainFragmentShader}
+          uniforms={farUniforms}
+          side={THREE.FrontSide}
+          fog={false}
+        />
+      </mesh>
 
-      {/* Far hills (mid-depth silhouettes) */}
-      {farHills.map((hill, i) => (
-        <mesh key={`far-${i}`} geometry={hill.geometry} renderOrder={-2}>
-          <meshBasicMaterial
-            ref={i === 0 ? farMaterialRef : undefined}
-            color="#0e1220"
-            fog
-          />
-        </mesh>
-      ))}
+      {/* Mid mountain ring */}
+      <mesh geometry={midRing} renderOrder={-2}>
+        <shaderMaterial
+          ref={midMatRef}
+          vertexShader={mountainVertexShader}
+          fragmentShader={mountainFragmentShader}
+          uniforms={midUniforms}
+          side={THREE.FrontSide}
+          fog={false}
+        />
+      </mesh>
 
-      {/* Near hills (sharper silhouettes) */}
-      {nearHills.map((hill, i) => (
-        <mesh key={`near-${i}`} geometry={hill.geometry}>
-          <meshBasicMaterial
-            ref={i === 0 ? nearMaterialRef : undefined}
-            color="#0a0c12"
-            fog
-          />
-        </mesh>
-      ))}
+      {/* Near foothills ring */}
+      <mesh geometry={nearRing} renderOrder={-1}>
+        <shaderMaterial
+          ref={nearMatRef}
+          vertexShader={mountainVertexShader}
+          fragmentShader={mountainFragmentShader}
+          uniforms={nearUniforms}
+          side={THREE.FrontSide}
+          fog={false}
+        />
+      </mesh>
 
-      {/* Tree silhouettes on hilltops — varied shapes */}
+      {/* Tree silhouettes on hilltops */}
       {trees.map((tree, i) => (
         <mesh
           key={`tree-${i}`}
@@ -405,7 +563,7 @@ export default function Horizon({ timeOfDay }: { timeOfDay: number }) {
           <meshBasicMaterial
             ref={i === 0 ? treeMaterialRef : undefined}
             color="#060810"
-            fog
+            fog={false}
           />
         </mesh>
       ))}
@@ -422,7 +580,7 @@ export default function Horizon({ timeOfDay }: { timeOfDay: number }) {
           <meshBasicMaterial
             ref={i === 0 ? farmMaterialRef : undefined}
             color="#060810"
-            fog
+            fog={false}
           />
         </mesh>
       ))}

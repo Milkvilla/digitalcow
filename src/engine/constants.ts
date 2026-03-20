@@ -10,6 +10,7 @@ export const MAX_SUBSTEPS_PER_FRAME = 20    // safety cap
 export const HUNGER_DECAY_PER_SEC = 0.5     // hunger 0→100 in ~200s
 export const ENERGY_DECAY_PER_SEC = 0.3     // energy 100→0 in ~333s
 export const HAPPINESS_DECAY_PER_SEC = 0.2  // happiness 100→0 in ~500s
+export const THIRST_DECAY_PER_SEC = 0.4     // thirst 0→100 in ~250s
 
 // ── Behavior Effects (per sim-second) ───────────────────
 
@@ -41,6 +42,8 @@ export const MAX_DECISION_INTERVAL = 15
 
 export const HUNGER_CRITICAL = 85
 export const ENERGY_CRITICAL = 15
+export const THIRST_CRITICAL = 80
+export const HEALTH_CRITICAL = 30
 
 // ── Camera ──────────────────────────────────────────────
 
@@ -119,12 +122,13 @@ export const FOOD_PROPERTIES: Record<FoodType, {
   hungerReduction: number
   happinessBoost: number
   energyBoost: number
+  thirstEffect: number    // positive = increases thirst, negative = decreases
   label: string
   color: string
 }> = {
-  hay:    { amount: 300, hungerReduction: 15, happinessBoost: 0,  energyBoost: 0,  label: 'Hay',    color: '#c4a840' },
-  apple:  { amount: 60,  hungerReduction: 12, happinessBoost: 5,  energyBoost: 3,  label: 'Apple',  color: '#cc3333' },
-  carrot: { amount: 70,  hungerReduction: 10, happinessBoost: 2,  energyBoost: 5,  label: 'Carrot', color: '#ee8833' },
+  hay:    { amount: 300, hungerReduction: 15, happinessBoost: 0,  energyBoost: 0,  thirstEffect: 0.3,  label: 'Hay',    color: '#c4a840' },
+  apple:  { amount: 60,  hungerReduction: 12, happinessBoost: 5,  energyBoost: 3,  thirstEffect: -0.5, label: 'Apple',  color: '#cc3333' },
+  carrot: { amount: 70,  hungerReduction: 10, happinessBoost: 2,  energyBoost: 5,  thirstEffect: -0.2, label: 'Carrot', color: '#ee8833' },
 }
 
 // ── Grass Patch (dense grazing area near pond) ───────────
@@ -140,6 +144,7 @@ export const POND_DRINK_SPOT: Vec3 = [-5.5, 0, -3]  // edge of pond nearest the 
 
 export const DRINK_DURATION = 4              // sim-seconds
 export const DRINKING_HAPPINESS_BOOST = 2
+export const DRINKING_THIRST_REDUCTION = 25  // thirst reduction per second while drinking
 export const GRAZE_PATCH_DURATION = 8        // sim-seconds
 
 // ── Home / Sleep Routing ────────────────────────────────
@@ -154,3 +159,93 @@ export const SETTLE_DURATION = 3                // seconds to settle before slee
 export const JUMP_DURATION = 0.8         // sim-seconds
 export const JUMP_HAPPINESS_BOOST = 8
 export const JUMP_ENERGY_COST = 5
+
+// ── Thirst ──────────────────────────────────────────────
+
+export const RAIN_THIRST_SLOW_FACTOR = 0.2   // rain slows thirst decay by 20%
+
+// ── Health ──────────────────────────────────────────────
+
+export const HEALTH_HUNGER_PENALTY = 0.1     // health loss/sec when hunger > 70
+export const HEALTH_THIRST_PENALTY = 0.1     // health loss/sec when thirst > 70
+export const HEALTH_ENERGY_PENALTY = 0.05    // health loss/sec when energy < 20
+export const HEALTH_WEATHER_PENALTY = 0.02   // health loss/sec per rain intensity when exposed
+export const HEALTH_RECOVERY_RATE = 0.05     // health gain/sec when conditions are good
+export const HEALTH_LOW_SPEED_PENALTY = 0.2  // movement speed reduction when health < 50
+export const HEALTH_LOW_HAPPINESS_PENALTY = 0.5  // extra happiness decay multiplier when health < 50
+
+// ── Milk Production ──────────────────────────────────────
+
+export const MILK_BASE_RATE = 0.5            // liters per sim-hour base rate
+export const MILK_MAX_STORAGE = 100          // max milk in udder
+export const MILK_OVER_MILKING_THRESHOLD = 20 // milking below this = over-milking
+export const MILK_OVER_MILKING_PENALTY = 10  // happiness loss for over-milking
+export const MILK_FULL_COMFORT_PENALTY = 0.05 // happiness loss/sec when storage > 90
+export const MILK_DRAIN_PER_MILKING = 80     // how much milk is drained per milking session
+export const MILK_MIN_AGE = 0.5              // minimum age for milk production
+
+// ── Relationship Tiers ───────────────────────────────────
+
+export const TRUST_TIER_WARY = 30        // 0-30 = wary
+export const TRUST_TIER_FAMILIAR = 65    // 31-65 = familiar
+// 66+ = bonded
+
+// ── Daily Routine Schedule ──────────────────────────────
+
+export const ROUTINE = {
+  morningExplore: { start: 6, end: 8 },
+  morningGraze:   { start: 8, end: 11 },
+  middayRest:     { start: 12, end: 14 },
+  afternoonGraze: { start: 15, end: 17 },
+  eveningReturn:  { start: 18, end: 20 },
+  nightSleep:     { startHour: 20, endHour: 6 },
+}
+
+// ── Seasonal Modifiers ───────────────────────────────────
+
+export const SEASON_MODIFIERS: Record<number, {
+  hungerMultiplier: number
+  energyCostMultiplier: number
+  dayLengthShift: number
+  label: string
+}> = {
+  0: { hungerMultiplier: 1.0,  energyCostMultiplier: 1.0,  dayLengthShift: 0,   label: 'Spring' },
+  1: { hungerMultiplier: 0.9,  energyCostMultiplier: 0.9,  dayLengthShift: 1,   label: 'Summer' },
+  2: { hungerMultiplier: 1.1,  energyCostMultiplier: 1.1,  dayLengthShift: -0.5, label: 'Autumn' },
+  3: { hungerMultiplier: 1.2,  energyCostMultiplier: 1.2,  dayLengthShift: -1,  label: 'Winter' },
+}
+
+// ── Weather Effects on Movement ─────────────────────────
+
+export const MUD_SPEED_PENALTY = 0.2        // 20% speed reduction during/after rain outdoors
+
+// ── Age Progression ──────────────────────────────────────
+
+export const AGE_PER_SIM_DAY = 0.002        // age increase per sim-day (0→1 in 500 days)
+export const AGE_NUTRITION_BONUS = 1.5       // well-fed cow ages 50% faster
+
+// ── Gate Defaults ────────────────────────────────────────
+
+export const DEFAULT_GATES = [
+  {
+    id: 'gate_right',
+    position: [14, 0, 0] as Vec3,
+    isOpen: true,
+    exclusionRadius: 2.5,
+  },
+]
+
+// ── Social Animal Effects ────────────────────────────────
+
+export const SOCIAL_HAPPINESS_BONUS = 0.002  // happiness/sec from nearby animals
+export const DOG_EXCITEMENT_BONUS = 3        // wander score boost when dog nearby
+
+// ── Barn Bonuses ─────────────────────────────────────────
+
+export const BARN_ENERGY_BONUS = 1.5         // energy recovery multiplier when in barn
+export const BARN_SHELTER_PROTECTION = true   // no weather damage in barn
+
+// ── Persistence ──────────────────────────────────────────
+
+export const SAVE_KEY = 'digitalcow_save'
+export const AUTOSAVE_INTERVAL = 60_000      // autosave every 60 real seconds

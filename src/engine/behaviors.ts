@@ -4,12 +4,14 @@ import type {
   Activity,
   CowBehavior,
   Vec3,
+  RelationshipTier,
 } from './types'
 import {
   BEHAVIOR_STICKINESS,
   SCORE_NOISE,
   HUNGER_CRITICAL,
   ENERGY_CRITICAL,
+  THIRST_CRITICAL,
   SUNRISE_HOUR,
   SUNSET_HOUR,
   HOME_ANCHOR,
@@ -17,23 +19,41 @@ import {
   POND_DRINK_SPOT,
   GRASS_PATCH_CENTER,
   GRASS_PATCH_RADIUS,
+  BARN_ENTRANCE,
+  ROUTINE,
+  TRUST_TIER_WARY,
+  TRUST_TIER_FAMILIAR,
+  DOG_EXCITEMENT_BONUS,
 } from './constants'
 import { findNearestFood, sampleRoamTarget, distanceXZ, foodStopPosition } from './world-query'
+
+// ── Relationship tier helper ─────────────────────────────
+
+export function getRelationshipTier(trust: number): RelationshipTier {
+  if (trust <= TRUST_TIER_WARY) return 'wary'
+  if (trust <= TRUST_TIER_FAMILIAR) return 'familiar'
+  return 'bonded'
+}
 
 // ── Score each possible activity ──────────────────────────
 
 /**
  * Produce a utility score for each candidate activity based on the cow's
- * current needs, personality, time of day, and available world resources.
+ * current needs, personality, time of day, available world resources,
+ * weather, health, thirst, age, relationship tier, and daily routine.
  */
 export function scoreActivities(
   cow: CowState,
   world: WorldState,
+  rain: boolean = false,
+  rainIntensity: number = 0,
 ): Record<string, number> {
-  const { hunger, energy, happiness } = cow.needs
+  const { hunger, energy, happiness, thirst } = cow.needs
   const { trust, curiosity } = cow.personality
   const hasFood = world.foods.some((f) => f.amount > 0)
   const tod = world.timeOfDay
+  const tier = getRelationshipTier(trust)
+  const healthPenalty = cow.health < 50 ? 0.5 : 1.0  // halve certain scores when unhealthy
 
   // Time-of-day modifiers
   const isNight = tod < SUNRISE_HOUR || tod > SUNSET_HOUR
@@ -43,70 +63,132 @@ export function scoreActivities(
   const isAfternoon = tod >= 14 && tod < SUNSET_HOUR - 2
   const isEvening = tod >= SUNSET_HOUR - 2 && tod <= SUNSET_HOUR
 
+  // Routine-based time checks
+  const inMorningExplore = tod >= ROUTINE.morningExplore.start && tod < ROUTINE.morningExplore.end
+  const inMorningGraze = tod >= ROUTINE.morningGraze.start && tod < ROUTINE.morningGraze.end
+  const inMiddayRest = tod >= ROUTINE.middayRest.start && tod < ROUTINE.middayRest.end
+  const inAfternoonGraze = tod >= ROUTINE.afternoonGraze.start && tod < ROUTINE.afternoonGraze.end
+  const inEveningReturn = tod >= ROUTINE.eveningReturn.start && tod < ROUTINE.eveningReturn.end
+
+  // Distance from barn
+  const distHome = distanceXZ(cow.position, HOME_ANCHOR)
+  const farFromHome = distHome > HOME_RADIUS
+  const isInBarn = distHome < HOME_RADIUS + 2.0
+
+  // Age modifiers
+  const isCalf = cow.age < 0.3
+  const isYoung = cow.age >= 0.3 && cow.age < 0.7
+
   const scores: Record<string, number> = {}
 
-  // Eating placed food — always go eat if food exists, boosted when hungry
+  // ── Eating placed food ──
   scores['go_to_food'] = hasFood
     ? 40 + hunger * 1.0 + (hunger >= HUNGER_CRITICAL ? 30 : 0)
     : 0
 
-  // Grazing — morning and afternoon are prime grazing time
+  // ── Grazing ──
   scores['graze'] = hunger * 0.6
+  if (inMorningGraze || inAfternoonGraze) scores['graze'] += 20
   if (isMorning || isAfternoon) scores['graze'] += 15
   if (isDawn) scores['graze'] += 10
+  // Rain discourages outdoor grazing
+  if (rain) scores['graze'] -= rainIntensity * 15
 
-  // Sleep — strongly favored at night, penalized during day
-  // At night, cow should go to barn first (go_home), not sleep in the field
+  // ── Sleep ──
   scores['sleep'] = (100 - energy) * 0.9 + (energy <= ENERGY_CRITICAL ? 40 : 0)
   if (isEvening) scores['sleep'] += 20
   if (isMorning || isAfternoon) scores['sleep'] -= 20
-  const distHome = distanceXZ(cow.position, HOME_ANCHOR)
-  if (isNight && distHome > HOME_RADIUS) {
-    // Far from barn at night — strongly discourage sleeping in the field
-    scores['sleep'] -= 60
+  if (isNight && farFromHome) {
+    scores['sleep'] -= 60  // don't sleep in field at night
   } else if (isNight) {
-    // Inside barn at night — sleep is great
-    scores['sleep'] += 50
+    scores['sleep'] += 50  // inside barn at night — sleep is great
   }
 
-  // Rest — midday siesta, or when tired
+  // ── Rest ──
   scores['rest'] = (100 - energy) * 0.4
+  if (inMiddayRest) scores['rest'] += 25
   if (isMidday) scores['rest'] += 20
   if (isNight) scores['rest'] += 10
 
-  // Wander — curiosity-driven, more active in morning/afternoon
+  // ── Wander ──
   scores['wander'] = 20 + curiosity * 0.3 + happiness * 0.1
+  if (inMorningExplore) scores['wander'] += 20  // morning explore routine
   if (isMorning || isAfternoon) scores['wander'] += 10
   if (isNight) scores['wander'] -= 15
+  // Calves stay closer to home
+  if (isCalf && farFromHome) scores['wander'] -= 15
+  // Rain reduces wandering
+  if (rain) scores['wander'] -= rainIntensity * 30
+  // Dog nearby encourages wandering
+  scores['wander'] += DOG_EXCITEMENT_BONUS
+  // Health penalty
+  scores['wander'] *= healthPenalty
 
-  // Idle — low baseline
+  // ── Idle ──
   scores['idle'] = 10
   if (isNight) scores['idle'] += 15
 
-  // Go home — walk toward barn before sleeping
+  // ── Go home ──
   const tiredness = 100 - energy
-  const distFromHome = distanceXZ(cow.position, HOME_ANCHOR)
-  const farFromHome = distFromHome > HOME_RADIUS
   if (isNight && farFromHome) {
     scores['go_home'] = 60 + tiredness * 0.5
+  } else if (inEveningReturn && farFromHome) {
+    scores['go_home'] = 40 + tiredness * 0.4  // routine: return at dusk
   } else if (isEvening && farFromHome) {
     scores['go_home'] = 30 + tiredness * 0.3
   } else {
     scores['go_home'] = 0
   }
+  // Calves want to be home more
+  if (isCalf && farFromHome) scores['go_home'] += 20
 
-  // React to player
+  // ── React to player ──
   scores['react_to_player'] = trust * 0.2 + happiness * 0.1
   if (isNight) scores['react_to_player'] -= 10
+  // Calves are more playful
+  if (isCalf || isYoung) scores['react_to_player'] += 15
+  // Health penalty
+  scores['react_to_player'] *= healthPenalty
 
-  // Drink at pond — occasional, boosted when grazing or eating nearby
-  scores['go_to_pond'] = 8
+  // ── Drink at pond ── (NOW DRIVEN BY THIRST)
+  scores['go_to_pond'] = 8 + thirst * 0.8  // thirst is primary driver
+  if (thirst >= THIRST_CRITICAL) scores['go_to_pond'] += 40  // urgently thirsty
   if (isMorning || isAfternoon) scores['go_to_pond'] += 5
-  if (hunger < 40) scores['go_to_pond'] += 5  // more likely to drink after eating
+  if (hunger < 40) scores['go_to_pond'] += 5  // more likely after eating
+  // Rain slightly reduces urgency (rain slows thirst)
+  if (rain) scores['go_to_pond'] -= rainIntensity * 5
 
-  // Graze at grass patch — like regular grazing but destination-based
+  // ── Graze at grass patch ──
   scores['go_to_grass'] = hunger * 0.4
+  if (inMorningGraze || inAfternoonGraze) scores['go_to_grass'] += 15
   if (isMorning || isAfternoon) scores['go_to_grass'] += 10
+  if (rain) scores['go_to_grass'] -= rainIntensity * 10
+
+  // ── Seek shelter (rain-driven) ──
+  if (rain && !isInBarn) {
+    const shelterScore = rainIntensity * 50  // heavy rain = strong urge
+    if (rainIntensity > 0.7) {
+      scores['seek_shelter'] = shelterScore + 30  // very heavy rain forces shelter
+    } else {
+      scores['seek_shelter'] = shelterScore
+    }
+    // Already going home? boost that instead
+    if (scores['go_home'] > 0) scores['go_home'] += rainIntensity * 20
+  } else {
+    scores['seek_shelter'] = 0
+  }
+
+  // ── Season-based adjustments ──
+  if (world.season === 3) {
+    // Winter: prefer staying warm, rest more
+    scores['rest'] += 10
+    scores['go_home'] += 10
+    scores['wander'] -= 10
+  } else if (world.season === 1) {
+    // Summer: more active, explore more
+    scores['wander'] += 5
+    scores['go_to_pond'] += 5  // drink more in summer
+  }
 
   return scores
 }
@@ -174,6 +256,11 @@ export function buildActivity(
       return { type: 'go_to_grass', destination: [gx, 0, gz] as Vec3 }
     }
 
+    case 'seek_shelter': {
+      // Head to barn entrance for shelter
+      return { type: 'seek_shelter', destination: [...BARN_ENTRANCE] as Vec3 }
+    }
+
     case 'idle':
     default:
       return { type: 'idle' }
@@ -223,6 +310,8 @@ export function behaviorFromActivity(activity: Activity): CowBehavior {
       return 'walking'
     case 'milking':
       return 'idle'
+    case 'seek_shelter':
+      return 'walking'
     default:
       return 'idle'
   }

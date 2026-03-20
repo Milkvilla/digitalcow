@@ -10,6 +10,9 @@ import { SCENE_LAYOUT } from '../engine/constants.ts'
 const mergedMat = new THREE.MeshStandardMaterial({
   vertexColors: true,
   flatShading: true,
+  roughness: 0.82,
+  metalness: 0,
+  envMapIntensity: 0.4,
 })
 
 // ── Color constants ──

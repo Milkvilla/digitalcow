@@ -24,6 +24,23 @@ export type FoodType = 'hay' | 'apple' | 'carrot'
 
 export type BreedId = 'holstein' | 'gir' | 'sindhi' | 'sahiwal' | 'kankrej'
 
+// ── Relationship Tiers ────────────────────────────────────
+
+export type RelationshipTier = 'wary' | 'familiar' | 'bonded'
+
+// ── Health Conditions (derived, not stored) ────────────────
+
+export type CowCondition =
+  | 'healthy'
+  | 'tired'
+  | 'stressed'
+  | 'cold'
+  | 'overheated'
+  | 'hungry'
+  | 'thirsty'
+
+// ── Player Actions ─────────────────────────────────────────
+
 export type PlayerAction =
   | { type: 'place_food'; foodType: FoodType }
   | { type: 'play' }
@@ -33,6 +50,7 @@ export type PlayerAction =
   | { type: 'drink' }
   | { type: 'graze_patch' }
   | { type: 'milk' }
+  | { type: 'toggle_gate'; gateId: string }
 
 // ── Activity (intent layer) ─────────────────────────────
 
@@ -55,6 +73,7 @@ export type Activity =
   | { type: 'leave_barn' }
   | { type: 'go_to_milk'; destination: Vec3 }
   | { type: 'milking' }
+  | { type: 'seek_shelter'; destination: Vec3 }
 
 // ── Engine Events ───────────────────────────────────────
 
@@ -66,7 +85,7 @@ export type EngineEvent =
   | { type: 'pet_received' }
   | { type: 'play_started' }
   | { type: 'arrived_at_target' }
-  | { type: 'need_critical'; need: keyof CowNeeds; value: number }
+  | { type: 'need_critical'; need: string; value: number }
   | { type: 'cow_jumped' }
   | { type: 'cow_called' }
   | { type: 'cow_went_home' }
@@ -74,6 +93,12 @@ export type EngineEvent =
   | { type: 'cow_drinking' }
   | { type: 'cow_grazing_patch' }
   | { type: 'cow_milked' }
+  | { type: 'milk_produced'; amount: number }
+  | { type: 'relationship_changed'; tier: RelationshipTier }
+  | { type: 'health_warning'; condition: CowCondition }
+  | { type: 'achievement_unlocked'; id: string }
+  | { type: 'gate_toggled'; gateId: string; isOpen: boolean }
+  | { type: 'day_passed'; dayCount: number }
 
 // ── Cow State ───────────────────────────────────────────
 
@@ -81,6 +106,7 @@ export interface CowNeeds {
   hunger: number       // 0 (full) → 100 (starving)
   energy: number       // 0 (exhausted) → 100 (fully rested)
   happiness: number    // 0 (miserable) → 100 (joyful)
+  thirst: number       // 0 (hydrated) → 100 (dehydrated)
 }
 
 export interface CowPersonality {
@@ -99,6 +125,10 @@ export interface CowState {
   facingAngle: number
   breed: BreedId
   age: number             // 0.0 (newborn calf) → 1.0 (full adult/mother)
+  health: number          // 0–100 (overall health)
+  milkStorage: number     // 0–100 (current milk in udder)
+  lastMilkedAt: number    // simulationTime of last milking
+  conditions: CowCondition[]  // derived conditions (computed each tick)
 }
 
 // ── World State ─────────────────────────────────────────
@@ -116,6 +146,13 @@ export interface ExclusionZone {
   radius: number
 }
 
+export interface Gate {
+  id: string
+  position: Vec3         // center of gate
+  isOpen: boolean
+  exclusionRadius: number  // radius when closed
+}
+
 export interface WorldState {
   timeOfDay: number           // 0.0 – 24.0
   timeSpeed: number           // multiplier
@@ -127,6 +164,43 @@ export interface WorldState {
   exclusionZones: ExclusionZone[]
   showButterflies: boolean
   season: number // 0=spring, 1=summer, 2=autumn, 3=winter
+  dayCount: number           // number of sim-days elapsed
+  lastDayChangeHour: number  // track when day rolls over
+  gates: Gate[]
+}
+
+// ── Daily Tasks & Achievements ──────────────────────────
+
+export interface DailyTask {
+  id: string
+  label: string
+  completed: boolean
+}
+
+export interface Achievement {
+  id: string
+  label: string
+  description: string
+  unlocked: boolean
+  unlockedAt?: number  // simulationTime when unlocked
+}
+
+export interface TaskState {
+  dailyTasks: DailyTask[]
+  achievements: Achievement[]
+  dailyTaskResetDay: number  // dayCount when tasks were last reset
+  // tracking counters for achievements
+  consecutiveMilkDays: number
+  happyDayCount: number
+  totalMilkProduced: number
+}
+
+// ── Milk Production Stats ────────────────────────────────
+
+export interface MilkStats {
+  totalProduced: number
+  todayProduced: number
+  lastProductionDay: number
 }
 
 // ── First-Person Input Intent ──────────────────────────
@@ -147,6 +221,8 @@ export interface GameStore {
   rain: boolean
   rainIntensity: number  // 0.0 – 1.0
   firstPersonIntent: FirstPersonIntent | null
+  tasks: TaskState
+  milkStats: MilkStats
 
   tick: (dt: number) => void
   playerAction: (action: PlayerAction) => void
@@ -162,4 +238,6 @@ export interface GameStore {
   setAge: (age: number) => void
   setSeason: (season: number) => void
   flushEvents: () => void
+  getRelationshipTier: () => RelationshipTier
+  getConditions: () => CowCondition[]
 }
