@@ -163,22 +163,20 @@ interface ShotDef {
 }
 
 const SHOT_SEQUENCE: ShotDef[] = [
-  { type: 'establishing', duration: 12,  fov: 48 },   // high wide establishing
-  { type: 'orbit',        duration: 16,  fov: 38 },   // smooth orbit
-  { type: 'closeup',      duration: 9,   fov: 26 },   // tight portrait
-  { type: 'scenic',       duration: 14,  fov: 44 },   // POI showcase → cow
-  { type: 'tracking',     duration: 13,  fov: 34 },   // side dolly track
-  { type: 'crane',        duration: 15,  fov: 42 },   // crane down
-  { type: 'overShoulder', duration: 10,  fov: 30 },   // behind cow looking out
-  { type: 'flyby',        duration: 11,  fov: 36 },   // fast low sweep past cow
-  { type: 'lowAngle',     duration: 11,  fov: 30 },   // dramatic hero shot
-  { type: 'dolly',        duration: 13,  fov: 36 },   // dolly in
+  { type: 'establishing', duration: 14,  fov: 50 },   // high wide farm overview
   { type: 'orbit',        duration: 18,  fov: 40 },   // wide slow orbit
-  { type: 'closeup',      duration: 7,   fov: 24 },   // quick tight
-  { type: 'establishing', duration: 14,  fov: 50 },   // golden hour wide
-  { type: 'tracking',     duration: 11,  fov: 32 },   // close tracking
-  { type: 'scenic',       duration: 12,  fov: 42 },   // scenic sweep
-  { type: 'crane',        duration: 14,  fov: 40 },   // crane up (reverse)
+  { type: 'scenic',       duration: 14,  fov: 46 },   // POI showcase → cow
+  { type: 'crane',        duration: 16,  fov: 44 },   // crane sweep
+  { type: 'establishing', duration: 16,  fov: 52 },   // ultra-wide panoramic
+  { type: 'dolly',        duration: 14,  fov: 42 },   // wide dolly
+  { type: 'orbit',        duration: 20,  fov: 42 },   // wide dreamy orbit
+  { type: 'scenic',       duration: 13,  fov: 44 },   // scenic sweep
+  { type: 'crane',        duration: 15,  fov: 46 },   // high crane
+  { type: 'establishing', duration: 14,  fov: 48 },   // drifting wide shot
+  { type: 'orbit',        duration: 16,  fov: 38 },   // medium orbit
+  { type: 'dolly',        duration: 14,  fov: 40 },   // gentle dolly
+  { type: 'scenic',       duration: 14,  fov: 44 },   // scenic reveal
+  { type: 'crane',        duration: 16,  fov: 42 },   // crane down
 ]
 
 function CinematicCamera() {
@@ -239,14 +237,13 @@ function CinematicCamera() {
       shotIndexRef.current++
       const baseAngle = seed.current.angle + (Math.random() - 0.5) * 2.0
       const nextShot = SHOT_SEQUENCE[shotIndexRef.current % SHOT_SEQUENCE.length]
-      const testR = nextShot.type === 'closeup' || nextShot.type === 'overShoulder' ? 4 : 10
       seed.current = {
         angle: baseAngle,
-        safeAngle: findSafeAngle(cowPos[0], cowPos[2], baseAngle, testR),
+        safeAngle: findSafeAngle(cowPos[0], cowPos[2], baseAngle, 14),
         poiIdx: Math.floor(Math.random() * POI.length),
         side: Math.random() > 0.5 ? 1 : -1,
-        startRadius: 8 + Math.random() * 6,
-        heightBias: Math.random() * 2,
+        startRadius: 10 + Math.random() * 6,
+        heightBias: Math.random() * 3,
       }
     }
 
@@ -260,15 +257,15 @@ function CinematicCamera() {
 
     switch (shot.type) {
       case 'orbit': {
-        // Smooth orbit around cow at medium distance
-        s.angle += dt * 0.055
-        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.angle, s.startRadius)
-        const r = s.startRadius + Math.sin(t * 0.03) * 1.5
-        const h = 4 + s.heightBias + Math.sin(t * 0.025 + 1.2) * 2
+        // Wide orbit around cow
+        s.angle += dt * 0.04
+        const orbitR = 12 + s.startRadius * 0.5 + Math.sin(t * 0.025) * 2
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.angle, orbitR)
+        const h = 6 + s.heightBias + Math.sin(t * 0.02 + 1.2) * 2.5
         _pos.current.set(
-          cowWorld.x + Math.cos(safeA) * r,
+          cowWorld.x + Math.cos(safeA) * orbitR,
           h,
-          cowWorld.z + Math.sin(safeA) * r,
+          cowWorld.z + Math.sin(safeA) * orbitR,
         )
         _target.current.set(cowWorld.x, cowWorld.y + 0.1, cowWorld.z)
         break
@@ -310,10 +307,10 @@ function CinematicCamera() {
       }
 
       case 'crane': {
-        // Crane: swoops from high/wide down to medium height
-        const craneH = 16 * (1 - ease) + 5 * ease
-        const craneR = 16 * (1 - ease) + 8 * ease
-        s.angle += dt * 0.04
+        // Wide crane: sweeps from very high down to medium-high
+        const craneH = 20 * (1 - ease) + 8 * ease
+        const craneR = 18 * (1 - ease) + 12 * ease
+        s.angle += dt * 0.03
         const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.angle, craneR)
         _pos.current.set(
           cowWorld.x + Math.cos(safeA) * craneR,
@@ -339,29 +336,29 @@ function CinematicCamera() {
       }
 
       case 'establishing': {
-        // High wide shot — shows the whole farm, gently panning
-        s.angle += dt * 0.012
-        const estR = 18 + Math.sin(t * 0.01) * 2
+        // High wide panoramic — shows the whole farm
+        s.angle += dt * 0.01
+        const estR = 20 + Math.sin(t * 0.008) * 3
         _pos.current.set(
           Math.cos(s.angle) * estR,
-          16 + Math.sin(t * 0.015 + 2) * 2,
+          18 + Math.sin(t * 0.012 + 2) * 3,
           Math.sin(s.angle) * estR,
         )
-        // Target blends from farm center to cow over the shot
+        // Target drifts from farm center toward cow
         _target.current.set(
-          cowWorld.x * ease,
-          1 + cowWorld.y * ease,
-          cowWorld.z * ease,
+          cowWorld.x * ease * 0.6,
+          1 + cowWorld.y * ease * 0.4,
+          cowWorld.z * ease * 0.6,
         )
         break
       }
 
       case 'dolly': {
-        // Dolly in: starts wide, pushes in toward cow
-        const dollyStart = s.startRadius + 6
-        const dollyEnd = 4
+        // Wide dolly: starts very wide, gently pushes in to medium distance
+        const dollyStart = 20
+        const dollyEnd = 10
         const dollyR = dollyStart * (1 - ease) + dollyEnd * ease
-        const dollyH = 7 * (1 - ease) + 2.5 * ease
+        const dollyH = 12 * (1 - ease) + 6 * ease
         const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.safeAngle, dollyR)
         _pos.current.set(
           cowWorld.x + Math.cos(safeA) * dollyR,
@@ -393,16 +390,16 @@ function CinematicCamera() {
       }
 
       case 'scenic': {
-        // Start framed on a POI, sweep to reveal the cow
+        // Distant scenic: starts framed on a POI from far away, sweeps wide to reveal cow
         const poi = POI[s.poiIdx]
-        const fromX = poi[0] + Math.cos(s.safeAngle) * 5
-        const fromZ = poi[2] + Math.sin(s.safeAngle) * 5
-        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.safeAngle, 8)
-        const toX = cowWorld.x + Math.cos(safeA) * 8
-        const toZ = cowWorld.z + Math.sin(safeA) * 8
+        const fromX = poi[0] + Math.cos(s.safeAngle) * 10
+        const fromZ = poi[2] + Math.sin(s.safeAngle) * 10
+        const safeA = findSafeAngle(cowWorld.x, cowWorld.z, s.safeAngle, 14)
+        const toX = cowWorld.x + Math.cos(safeA) * 14
+        const toZ = cowWorld.z + Math.sin(safeA) * 14
         _pos.current.set(
           fromX * (1 - ease) + toX * ease,
-          poi[1] + 5 * (1 - ease) + 4 * ease,
+          poi[1] + 8 * (1 - ease) + 7 * ease,
           fromZ * (1 - ease) + toZ * ease,
         )
         _target.current.set(
